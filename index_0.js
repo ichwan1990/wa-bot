@@ -7,31 +7,12 @@ const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
 const { db } = require('./config/database');
-const axios = require("axios");
+const fetch = require("node-fetch");
 
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server);
 const sessionPath = path.join(__dirname, '.wwebjs_auth');
-
-async function getOllamaChatCompletion(prompt) {
-    try {
-        const response = await axios.post("http://192.168.88.11:11434/api/chat", {
-            model: "deepseek-r1:7b",
-            messages: [
-                { role: "user", content: prompt }
-            ],
-            stream: false
-        }, {
-            headers: { "Content-Type": "application/json" }
-        });
-        let content = response.data.message.content;
-        content = content.replace(/<think>[\s\S]*?<\/think>/g, "");
-        return content.trim();
-    } catch (error) {
-        console.error("Error:", error.response ? error.response.data : error.message);
-    }
-}
 
 app.get('/', (req, res) => {
     res.sendFile(__dirname + '/index.html');
@@ -70,23 +51,31 @@ client.on('ready', async () => {
     console.log('Client is ready!');
     io.emit('ready');
 
+    const me = await client.getState();
     const userInfo = await client.info;
     io.emit('user_info', userInfo.wid.user);
 });
 
 client.on('message', async message => {
     if (message.body.startsWith('ai:')) {
-        const userQuestion = message.body.substring(3).trim();
-        const answer = await getOllamaChatCompletion(userQuestion);
-        console.log(`User: ${userQuestion}`);
-        console.log(`AI: ${answer}`);
+        const sql = "INSERT INTO wa_messages (sender, message, timestamp) VALUES (?, ?, ?)";
+        const values = [message.from, message.body, new Date()];
 
-        if (answer) {
-            message.reply(answer);
-        } else {
-            message.reply("Maaf, saya tidak dapat memahami pertanyaan Anda.");
-        }
+        db.query(sql, values, (err, result) => {
+            if (err) {
+                console.error('Error inserting message into database:', err);
+            } else {
+                console.log('Message saved to database');
+            }
+        });
+
+        // Balas pesan
+        client.sendMessage(message.from, 'Pesan Anda telah diterima.').then(() => {
+            // Hapus pesan setelah dibalas
+            message.delete(true).catch(err => console.error('Error deleting message:', err));
+        }).catch(err => console.error('Error sending message:', err));
     } else if (message.body.toLowerCase() === 'hapus chat') {
+        // Hapus semua pesan dari user tersebut
         try {
             const chat = await message.getChat();
             await chat.clearMessages();
