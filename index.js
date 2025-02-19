@@ -1,3 +1,4 @@
+require('dotenv').config(); // Load dotenv
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const express = require('express');
 const http = require('http');
@@ -11,6 +12,8 @@ const app = express();
 const server = http.createServer(app);
 const io = socketIo(server);
 const sessionPath = path.join(__dirname, '.wwebjs_auth');
+
+const PORT = process.env.PORT || 3000;
 
 app.get('/', (req, res) => {
     res.sendFile(__dirname + '/index.html');
@@ -37,10 +40,10 @@ app.get('/logout', (req, res) => {
 });
 
 const client = new Client({
-    authStrategy: new LocalAuth({ clientId: 'elbot-wa' })
+    authStrategy: new LocalAuth({ clientId: process.env.CLIENT_ID })
 });
 
-// Panggil fungsi setupWhatsAppClient untuk menangani event
+// Panggil handler WhatsApp
 setupWhatsAppClient(client, io);
 
 client.initialize();
@@ -49,6 +52,6 @@ io.on('connection', (socket) => {
     console.log('User connected');
 });
 
-server.listen(3000, () => {
-    console.log('Server running on http://localhost:3000');
+server.listen(PORT, () => {
+    console.log(`Server running on http://localhost:${PORT}`);
 });

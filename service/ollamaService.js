@@ -1,9 +1,10 @@
+require('dotenv').config();
 const axios = require("axios");
 
 async function getOllamaChatCompletion(prompt) {
     try {
-        const response = await axios.post("http://192.168.88.11:11434/api/chat", {
-            model: "deepseek-r1:7b",
+        const response = await axios.post(`${process.env.OLLAMA_HOST}/api/chat`, {
+            model: process.env.OLLAMA_MODEL,
             messages: [{ role: "user", content: prompt }],
             stream: false
         }, {
