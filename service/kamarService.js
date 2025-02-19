@@ -4,9 +4,8 @@ async function getInfoKamar() {
     return new Promise((resolve, reject) => {
         const query = `
             SELECT 
-                k.kode_tt AS ID_SIRS,
-                k.kode_bpjs AS KODE_BPJS,
-                m.nama AS NAMA,
+                m.nama AS NAMA_RUANG,
+                k.kode_bpjs AS KELAS,
                 SUM(CASE WHEN k.status_pakai IN ('3', '4') THEN 1 ELSE 0 END) AS TERPAKAI,
                 COUNT(*) - SUM(CASE WHEN k.status_pakai IN ('3', '4') THEN 1 ELSE 0 END) AS KOSONG,
                 COUNT(*) AS TOTAL
@@ -14,8 +13,8 @@ async function getInfoKamar() {
             LEFT JOIN ri_ms_rawatinap m ON k.ruang = m.kode
             WHERE k.status_aktif = '1' 
               AND k.kode_tt <> 0
-            GROUP BY k.kode_tt, k.ruang, k.kode_bpjs, m.nama, k.is_cov
-            ORDER BY k.kode_tt ASC
+            GROUP BY m.nama, k.kode_bpjs
+            ORDER BY m.nama ASC, k.kode_bpjs ASC
         `;
 
         db.query(query, (err, results) => {
@@ -28,14 +27,20 @@ async function getInfoKamar() {
                 return resolve("Tidak ada data kamar tersedia.");
             }
 
-            let responseText = '*Info Kamar:*\n\n';
+            const now = new Date();
+            const formattedDate = now.toLocaleDateString('id-ID', {
+                weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+            });
+            const formattedTime = now.toLocaleTimeString('id-ID');
+            let responseText = `🏥 *Informasi Kamar:*\n\n*Tanggal:* ${formattedDate} ${formattedTime}\n\n`;
+            let currentRuang = '';
+
             results.forEach((row) => {
-                responseText += `🏥 *${row.NAMA}*\n`;
-                responseText += `- ID SIRS: ${row.ID_SIRS}\n`;
-                responseText += `- Kode BPJS: ${row.KODE_BPJS}\n`;
-                responseText += `- Terpakai: ${row.TERPAKAI}\n`;
-                responseText += `- Kosong: ${row.KOSONG}\n`;
-                responseText += `- Total: ${row.TOTAL}\n\n`;
+                if (row.NAMA_RUANG !== currentRuang) {
+                    currentRuang = row.NAMA_RUANG;
+                    responseText += `🛏 *${currentRuang}*\n`;
+                }
+                responseText += `- ${row.KELAS} : _Kosong :_ ${row.KOSONG} | _Terpakai :_ ${row.TERPAKAI} | _Total :_ ${row.TOTAL}\n`;
             });
 
             resolve(responseText);
