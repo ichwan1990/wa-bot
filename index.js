@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
 const { db } = require('./config/database');
+const fetch = require("node-fetch");
 
 const app = express();
 const server = http.createServer(app);
@@ -38,7 +39,7 @@ app.get('/logout', (req, res) => {
 });
 
 const client = new Client({
-    authStrategy: new LocalAuth()
+    authStrategy: new LocalAuth({ clientId: 'elbot-wa' })
 });
 
 client.on('qr', async (qr) => {
@@ -46,9 +47,43 @@ client.on('qr', async (qr) => {
     io.emit('qr', qrImage);
 });
 
-client.on('ready', () => {
+client.on('ready', async () => {
     console.log('Client is ready!');
     io.emit('ready');
+
+    const me = await client.getState();
+    const userInfo = await client.info;
+    io.emit('user_info', userInfo.wid.user);
+});
+
+client.on('message', async message => {
+    if (message.body.startsWith('ai:')) {
+        const sql = "INSERT INTO wa_messages (sender, message, timestamp) VALUES (?, ?, ?)";
+        const values = [message.from, message.body, new Date()];
+
+        db.query(sql, values, (err, result) => {
+            if (err) {
+                console.error('Error inserting message into database:', err);
+            } else {
+                console.log('Message saved to database');
+            }
+        });
+
+        // Balas pesan
+        client.sendMessage(message.from, 'Pesan Anda telah diterima.').then(() => {
+            // Hapus pesan setelah dibalas
+            message.delete(true).catch(err => console.error('Error deleting message:', err));
+        }).catch(err => console.error('Error sending message:', err));
+    } else if (message.body.toLowerCase() === 'hapus chat') {
+        // Hapus semua pesan dari user tersebut
+        try {
+            const chat = await message.getChat();
+            await chat.clearMessages();
+            console.log(`Semua pesan dari ${message.from} telah dihapus.`);
+        } catch (err) {
+            console.error('Error clearing messages:', err);
+        }
+    }
 });
 
 client.initialize();

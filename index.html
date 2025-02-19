@@ -15,6 +15,9 @@
         <h1 class="mb-4">WhatsApp Web Login</h1>
         <div id="status" class="alert alert-warning">Menunggu QR Code...</div>
         <img id="qrcode" class="img-fluid border p-2" style="display:none;" alt="QR Code">
+        <div id="user-info" class="mt-3" style="display:none;">
+            <h4>Nomor Tertaut: <span id="phone-number"></span></h4>
+        </div>
         <button id="logout" class="btn btn-danger mt-3" style="display:none;">Logout</button>
     </div>
 
@@ -33,6 +36,11 @@
             document.getElementById('status').innerText = 'WhatsApp telah terkoneksi!';
             document.getElementById('qrcode').style.display = 'none';
             document.getElementById('logout').style.display = 'block';
+        });
+
+        socket.on('user_info', (number) => {
+            document.getElementById('user-info').style.display = 'block';
+            document.getElementById('phone-number').innerText = number;
         });
 
         document.getElementById('logout').addEventListener('click', () => {
