@@ -6,6 +6,7 @@ const qrcode = require('qrcode');
 const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
+const { db } = require('./config/database');
 
 const app = express();
 const server = http.createServer(app);
