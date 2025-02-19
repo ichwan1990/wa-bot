@@ -2,36 +2,15 @@ const { Client, LocalAuth } = require('whatsapp-web.js');
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
-const qrcode = require('qrcode');
 const fs = require('fs');
 const path = require('path');
 const { exec } = require('child_process');
-const { db } = require('./config/database');
-const axios = require("axios");
+const setupWhatsAppClient = require('./whatsappHandler');
 
 const app = express();
 const server = http.createServer(app);
 const io = socketIo(server);
 const sessionPath = path.join(__dirname, '.wwebjs_auth');
-
-async function getOllamaChatCompletion(prompt) {
-    try {
-        const response = await axios.post("http://192.168.88.11:11434/api/chat", {
-            model: "deepseek-r1:7b",
-            messages: [
-                { role: "user", content: prompt }
-            ],
-            stream: false
-        }, {
-            headers: { "Content-Type": "application/json" }
-        });
-        let content = response.data.message.content;
-        content = content.replace(/<think>[\s\S]*?<\/think>/g, "");
-        return content.trim();
-    } catch (error) {
-        console.error("Error:", error.response ? error.response.data : error.message);
-    }
-}
 
 app.get('/', (req, res) => {
     res.sendFile(__dirname + '/index.html');
@@ -61,41 +40,8 @@ const client = new Client({
     authStrategy: new LocalAuth({ clientId: 'elbot-wa' })
 });
 
-client.on('qr', async (qr) => {
-    const qrImage = await qrcode.toDataURL(qr);
-    io.emit('qr', qrImage);
-});
-
-client.on('ready', async () => {
-    console.log('Client is ready!');
-    io.emit('ready');
-
-    const userInfo = await client.info;
-    io.emit('user_info', userInfo.wid.user);
-});
-
-client.on('message', async message => {
-    if (message.body.startsWith('ai:')) {
-        const userQuestion = message.body.substring(3).trim();
-        const answer = await getOllamaChatCompletion(userQuestion);
-        console.log(`User: ${userQuestion}`);
-        console.log(`AI: ${answer}`);
-
-        if (answer) {
-            message.reply(answer);
-        } else {
-            message.reply("Maaf, saya tidak dapat memahami pertanyaan Anda.");
-        }
-    } else if (message.body.toLowerCase() === 'hapus chat') {
-        try {
-            const chat = await message.getChat();
-            await chat.clearMessages();
-            console.log(`Semua pesan dari ${message.from} telah dihapus.`);
-        } catch (err) {
-            console.error('Error clearing messages:', err);
-        }
-    }
-});
+// Panggil fungsi setupWhatsAppClient untuk menangani event
+setupWhatsAppClient(client, io);
 
 client.initialize();
 
