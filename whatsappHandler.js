@@ -3,6 +3,17 @@ const fs = require('fs');
 const { getOllamaChatCompletion } = require('./service/ollamaService');
 const { getInfoKamar } = require('./service/kamarService');
 const { getInfoPoli } = require('./service/poliService');
+const { checkPing } = require('./service/pingService');
+const { db } = require('./config/database');
+
+async function getIPsFromDatabase() {
+    return new Promise((resolve, reject) => {
+        db.query('SELECT ip_address, server_name FROM ip_list', (err, results) => {
+            if (err) reject(err);
+            else resolve(results);
+        });
+    });
+}
 
 module.exports = function setupWhatsAppClient(client, io) {
     client.on('qr', async (qr) => {
@@ -11,9 +22,8 @@ module.exports = function setupWhatsAppClient(client, io) {
     });
 
     client.on('ready', async () => {
-        console.log('Client is ready!');
+        console.log('✅ Client is ready!');
         io.emit('ready');
-
         const userInfo = await client.info;
         io.emit('user_info', userInfo.wid.user);
     });
@@ -23,45 +33,71 @@ module.exports = function setupWhatsAppClient(client, io) {
 
         if (lowerMessage.startsWith('ai:')) {
             const userQuestion = message.body.substring(3).trim();
+            message.reply('⏳ *Sedang memproses pertanyaan Anda... Mohon tunggu sebentar!*');
             const answer = await getOllamaChatCompletion(userQuestion);
-
-            if (answer) {
-                message.reply(answer);
-            } else {
-                message.reply("Maaf, saya tidak dapat memahami pertanyaan Anda.");
-            }
+            message.reply(answer ? answer : '❌ *Maaf, saya tidak dapat memahami pertanyaan Anda.*');
         } else if (lowerMessage === 'hapus chat') {
             try {
                 const chat = await message.getChat();
                 await chat.clearMessages();
-                console.log(`Semua pesan dari ${message.from} telah dihapus.`);
+                message.reply('✅ *Semua pesan dalam chat ini telah berhasil dihapus!*');
             } catch (err) {
                 console.error('Error clearing messages:', err);
             }
         } else if (lowerMessage === 'info kamar') {
             try {
                 const kamarInfo = await getInfoKamar();
-                message.reply(kamarInfo);
+                message.reply(`🏨 *Informasi Kamar:*\n${kamarInfo}`);
             } catch (err) {
                 console.error('Error fetching room info:', err);
-                message.reply("Maaf, terjadi kesalahan saat mengambil data kamar.");
+                message.reply('❌ *Gagal mengambil data kamar. Silakan coba lagi nanti!*');
             }
         } else if (lowerMessage.startsWith('info poli')) {
-            let tanggal = new Date().toISOString().split('T')[0]; // Default ke hari ini
-
-            // Jika pengguna mengirimkan "info poli YYYY-MM-DD"
+            let tanggal = new Date().toISOString().split('T')[0];
             const parts = lowerMessage.split(' ');
-            if (parts.length === 3) {
-                tanggal = parts[2]; // Ambil tanggal dari pesan
-            }
-
+            if (parts.length === 3) tanggal = parts[2];
             try {
                 const poliInfo = await getInfoPoli(tanggal);
-                message.reply(poliInfo);
+                message.reply(`🏥 *Jadwal Poli untuk ${tanggal}:*\n${poliInfo}`);
             } catch (err) {
                 console.error('Error fetching poli info:', err);
-                message.reply("Maaf, terjadi kesalahan saat mengambil data layanan poli.");
+                message.reply('❌ *Gagal mengambil informasi poli. Silakan coba lagi nanti!*');
             }
+        } else if (lowerMessage.startsWith('/ping ')) {
+            const targetIP = lowerMessage.split(' ')[1];
+            if (!targetIP) {
+                message.reply('⚠️ *Format salah!* Gunakan: `/ping <IP_ADDRESS>`');
+                return;
+            }
+            try {
+                const pingResult = await checkPing(targetIP);
+                message.reply(`🌍 *Hasil Ping ke ${targetIP}:*\n${pingResult}`);
+            } catch (err) {
+                console.error('Error during ping:', err);
+                message.reply('❗ *Gagal melakukan ping ke server. Pastikan IP valid dan coba lagi!*');
+            }
+        } else if (lowerMessage === 'ping server') {
+            try {
+                const targetServers = await getIPsFromDatabase();
+                if (!targetServers.length) {
+                    message.reply('⚠️ *Tidak ada IP yang tersimpan dalam database.*');
+                    return;
+                }
+                const results = await Promise.all(targetServers.map(({ ip_address, server_name }) => checkPing(ip_address, server_name)));
+                message.reply(`📡 *Hasil Ping ke Semua Server:*\n${results.join('\n\n')}`);
+            } catch (err) {
+                console.error('Error fetching IPs from database:', err);
+                message.reply('❗ *Terjadi kesalahan saat mengambil data IP dari database.*');
+            }
+        } else if (lowerMessage === 'menu') {
+            const menuMessage = `📌 *Menu Perintah WhatsApp Bot*:\n` +
+                `1️⃣ _*ai: <pertanyaan>*_ \n Ajukan pertanyaan ke AI 🤖\n` +
+                `2️⃣ _*hapus chat*_ \n Hapus semua pesan di chat ini 🗑️\n` +
+                `3️⃣ _*info kamar*_ \n Cek ketersediaan kamar 🏨\n` +
+                `4️⃣ _*info poli [YYYY-MM-DD]*_ \n Cek jadwal poli 📅\n` +
+                `5️⃣ _*/ping <IP_ADDRESS>*_ \n Cek koneksi ke IP tertentu 🌍\n` +
+                `6️⃣ _*ping server*_ \n Cek koneksi semua server yang ada dalam database 📡`;
+            message.reply(menuMessage);
         }
     });
 };
