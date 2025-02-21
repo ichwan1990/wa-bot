@@ -1,6 +1,8 @@
 const qrcode = require('qrcode');
+const fs = require('fs');
 const { getOllamaChatCompletion } = require('./service/ollamaService');
 const { getInfoKamar } = require('./service/kamarService');
+const { getInfoPoli } = require('./service/poliService');
 
 module.exports = function setupWhatsAppClient(client, io) {
     client.on('qr', async (qr) => {
@@ -22,8 +24,6 @@ module.exports = function setupWhatsAppClient(client, io) {
         if (lowerMessage.startsWith('ai:')) {
             const userQuestion = message.body.substring(3).trim();
             const answer = await getOllamaChatCompletion(userQuestion);
-            // console.log(`User: ${userQuestion}`);
-            // console.log(`AI: ${answer}`);
 
             if (answer) {
                 message.reply(answer);
@@ -45,6 +45,22 @@ module.exports = function setupWhatsAppClient(client, io) {
             } catch (err) {
                 console.error('Error fetching room info:', err);
                 message.reply("Maaf, terjadi kesalahan saat mengambil data kamar.");
+            }
+        } else if (lowerMessage.startsWith('info poli')) {
+            let tanggal = new Date().toISOString().split('T')[0]; // Default ke hari ini
+
+            // Jika pengguna mengirimkan "info poli YYYY-MM-DD"
+            const parts = lowerMessage.split(' ');
+            if (parts.length === 3) {
+                tanggal = parts[2]; // Ambil tanggal dari pesan
+            }
+
+            try {
+                const poliInfo = await getInfoPoli(tanggal);
+                message.reply(poliInfo);
+            } catch (err) {
+                console.error('Error fetching poli info:', err);
+                message.reply("Maaf, terjadi kesalahan saat mengambil data layanan poli.");
             }
         }
     });
