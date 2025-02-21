@@ -36,14 +36,6 @@ module.exports = function setupWhatsAppClient(client, io) {
             message.reply('⏳ *Sedang memproses pertanyaan Anda... Mohon tunggu sebentar!*');
             const answer = await getOllamaChatCompletion(userQuestion);
             message.reply(answer ? answer : '❌ *Maaf, saya tidak dapat memahami pertanyaan Anda.*');
-        } else if (lowerMessage === 'hapus chat') {
-            try {
-                const chat = await message.getChat();
-                await chat.clearMessages();
-                message.reply('✅ *Semua pesan dalam chat ini telah berhasil dihapus!*');
-            } catch (err) {
-                console.error('Error clearing messages:', err);
-            }
         } else if (lowerMessage === 'info kamar') {
             try {
                 const kamarInfo = await getInfoKamar();
@@ -92,11 +84,10 @@ module.exports = function setupWhatsAppClient(client, io) {
         } else if (lowerMessage === 'menu') {
             const menuMessage = `📌 *Menu Perintah WhatsApp Bot*:\n` +
                 `1️⃣ _*ai: <pertanyaan>*_ \n Ajukan pertanyaan ke AI 🤖\n` +
-                `2️⃣ _*hapus chat*_ \n Hapus semua pesan di chat ini 🗑️\n` +
-                `3️⃣ _*info kamar*_ \n Cek ketersediaan kamar 🏨\n` +
-                `4️⃣ _*info poli [YYYY-MM-DD]*_ \n Cek jadwal poli 📅\n` +
-                `5️⃣ _*/ping <IP_ADDRESS>*_ \n Cek koneksi ke IP tertentu 🌍\n` +
-                `6️⃣ _*ping server*_ \n Cek koneksi semua server yang ada dalam database 📡`;
+                `2️⃣ _*info kamar*_ \n Cek ketersediaan kamar 🏨\n` +
+                `3️⃣ _*info poli [YYYY-MM-DD]*_ \n Cek jadwal poli 📅\n` +
+                `4️⃣ _*/ping <IP_ADDRESS>*_ \n Cek koneksi ke IP tertentu 🌍\n` +
+                `5️⃣ _*ping server*_ \n Cek koneksi semua server yang ada dalam database 📡`;
             message.reply(menuMessage);
         }
     });
