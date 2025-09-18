@@ -1,94 +1,197 @@
 const qrcode = require('qrcode');
-const fs = require('fs');
-const { getOllamaChatCompletion } = require('./service/ollamaService');
 const { getInfoKamar } = require('./service/kamarService');
 const { getInfoPoli } = require('./service/poliService');
 const { checkPing } = require('./service/pingService');
 const { db } = require('./config/database');
 
-async function getIPsFromDatabase() {
-    return new Promise((resolve, reject) => {
-        db.query('SELECT ip_address, server_name FROM ip_list', (err, results) => {
-            if (err) reject(err);
-            else resolve(results);
-        });
-    });
+// -----------------------
+// Helper & Constants
+// -----------------------
+// Validasi pola tanggal dan host/IP
+const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+const HOST_REGEX = /^(\d{1,3}\.){3}\d{1,3}$|^[a-zA-Z0-9.-]+$/;
+const PING_BATCH_SIZE = Number(process.env.PING_BATCH_SIZE || 5);
+
+/**
+ * Validasi string tanggal format YYYY-MM-DD.
+ * @param {string} v
+ * @returns {boolean}
+ */
+function isValidDateStr(v) {
+    return DATE_REGEX.test(v) && !isNaN(Date.parse(v));
 }
+
+/**
+ * Validasi hostname atau IPv4 sederhana.
+ * @param {string} v
+ * @returns {boolean}
+ */
+function isValidHost(v) {
+    return HOST_REGEX.test(v);
+}
+
+/**
+ * Kirim balasan WhatsApp dengan penanganan error.
+ * @param {import('whatsapp-web.js').Message} message
+ * @param {string} text
+ */
+async function reply(message, text) {
+    try {
+        await message.reply(text);
+    } catch (e) {
+        console.error('Failed to send reply:', e);
+    }
+}
+
+/**
+ * Mengambil daftar server yang akan diping dari database.
+ * @returns {Promise<Array<{ip_address:string, server_name:string}>>}
+ */
+async function fetchServersToPing() {
+    try {
+        const [rows] = await db.promise().query('SELECT ip_address, server_name FROM ip_list');
+        return rows || [];
+    } catch (err) {
+        console.error('DB error fetching IPs:', err);
+        return [];
+    }
+}
+
+/**
+ * Membangun pesan menu bantuan.
+ * @returns {string}
+ */
+function buildMenuMessage() {
+    return (
+        `📌 *Menu Perintah WhatsApp Bot*:\n` +
+        `1️⃣ _*info kamar*_ \n Cek ketersediaan kamar 🏨\n` +
+        `2️⃣ _*info poli [YYYY-MM-DD]*_ \n Cek jadwal poli 📅\n` +
+        `3️⃣ _*/ping <IP_ADDRESS>*_ \n Cek koneksi ke IP tertentu 🌍\n` +
+        `4️⃣ _*ping server*_ \n Cek koneksi semua server yang ada dalam database 📡\n` +
+        `5️⃣ _*/help*_ atau _*menu*_ \n Tampilkan menu bantuan ❓`
+    );
+}
+
+/**
+ * Memproses array secara bertahap dalam batch paralel.
+ * @template T, R
+ * @param {T[]} items
+ * @param {number} batchSize
+ * @param {(item:T)=>Promise<R>} mapper
+ * @returns {Promise<R[]>}
+ */
+async function mapInBatches(items, batchSize, mapper) {
+    const results = [];
+    for (let i = 0; i < items.length; i += batchSize) {
+        const batch = items.slice(i, i + batchSize);
+        // eslint-disable-next-line no-await-in-loop
+        const mapped = await Promise.all(batch.map(mapper));
+        results.push(...mapped);
+    }
+    return results;
+}
+
 
 module.exports = function setupWhatsAppClient(client, io) {
     client.on('qr', async (qr) => {
-        const qrImage = await qrcode.toDataURL(qr);
-        io.emit('qr', qrImage);
+        try {
+            const qrImage = await qrcode.toDataURL(qr);
+            io.emit('qr', qrImage);
+        } catch (e) {
+            console.error('Failed generating QR:', e);
+        }
     });
 
     client.on('ready', async () => {
         console.log('✅ Client is ready!');
         io.emit('ready');
-        const userInfo = await client.info;
-        io.emit('user_info', userInfo.wid.user);
+        const userInfo = client.info; // client.info is a plain object
+        if (userInfo && userInfo.wid && userInfo.wid.user) {
+            io.emit('user_info', userInfo.wid.user);
+        }
     });
 
     client.on('message', async (message) => {
-        const lowerMessage = message.body.toLowerCase().trim();
+        // Abaikan pesan dari diri sendiri atau status broadcast
+        if (message.fromMe || message.from === 'status@broadcast') {
+            return;
+        }
+        const lowerMessage = (message.body || '').toLowerCase().trim();
 
-        if (lowerMessage.startsWith('ai:')) {
-            const userQuestion = message.body.substring(3).trim();
-            message.reply('⏳ *Sedang memproses pertanyaan Anda... Mohon tunggu sebentar!*');
-            const answer = await getOllamaChatCompletion(userQuestion);
-            message.reply(answer ? answer : '❌ *Maaf, saya tidak dapat memahami pertanyaan Anda.*');
-        } else if (lowerMessage === 'info kamar') {
+        if (lowerMessage === 'info kamar') {
             try {
                 const kamarInfo = await getInfoKamar();
-                message.reply(`🏨 *Informasi Kamar:*\n${kamarInfo}`);
+                await reply(message, `🏨 *Informasi Kamar:*\n${kamarInfo}`);
             } catch (err) {
                 console.error('Error fetching room info:', err);
-                message.reply('❌ *Gagal mengambil data kamar. Silakan coba lagi nanti!*');
+                await reply(message, '❌ *Gagal mengambil data kamar. Silakan coba lagi nanti!*');
             }
-        } else if (lowerMessage.startsWith('info poli')) {
+            return;
+        }
+
+        if (lowerMessage.startsWith('info poli')) {
             let tanggal = new Date().toISOString().split('T')[0];
-            const parts = lowerMessage.split(' ');
-            if (parts.length === 3) tanggal = parts[2];
+            const parts = lowerMessage.split(/\s+/);
+            if (parts.length === 3) {
+                const candidate = parts[2];
+                if (!isValidDateStr(candidate)) {
+                    await reply(message, '⚠️ *Format tanggal tidak valid.* Gunakan format `YYYY-MM-DD`, contoh: `info poli 2025-09-17`');
+                    return;
+                }
+                tanggal = candidate;
+            }
             try {
                 const poliInfo = await getInfoPoli(tanggal);
-                message.reply(`🏥 *Jadwal Poli untuk ${tanggal}:*\n${poliInfo}`);
+                await reply(message, `🏥 *Jadwal Poli untuk ${tanggal}:*\n${poliInfo}`);
             } catch (err) {
                 console.error('Error fetching poli info:', err);
-                message.reply('❌ *Gagal mengambil informasi poli. Silakan coba lagi nanti!*');
+                await reply(message, '❌ *Gagal mengambil informasi poli. Silakan coba lagi nanti!*');
             }
-        } else if (lowerMessage.startsWith('/ping ')) {
-            const targetIP = lowerMessage.split(' ')[1];
-            if (!targetIP) {
-                message.reply('⚠️ *Format salah!* Gunakan: `/ping <IP_ADDRESS>`');
+            return;
+        }
+
+        if (lowerMessage.startsWith('/ping')) {
+            const parts = lowerMessage.split(/\s+/);
+            const target = parts[1];
+            if (!target) {
+                await reply(message, '⚠️ *Format salah!* Gunakan: `/ping <IP_ADDRESS>`');
+                return;
+            }
+            if (!isValidHost(target)) {
+                await reply(message, '⚠️ *IP/Host tidak valid.* Contoh: `/ping 8.8.8.8`');
                 return;
             }
             try {
-                const pingResult = await checkPing(targetIP);
-                message.reply(`🌍 *Hasil Ping ke ${targetIP}:*\n${pingResult}`);
+                const pingResult = await checkPing(target);
+                await reply(message, `🌍 *Hasil Ping ke ${target}:*\n${pingResult}`);
             } catch (err) {
                 console.error('Error during ping:', err);
-                message.reply('❗ *Gagal melakukan ping ke server. Pastikan IP valid dan coba lagi!*');
+                await reply(message, '❗ *Gagal melakukan ping ke server. Pastikan IP valid dan coba lagi!*');
             }
-        } else if (lowerMessage === 'ping server') {
+            return;
+        }
+
+        if (lowerMessage === 'ping server') {
             try {
-                const targetServers = await getIPsFromDatabase();
+                const targetServers = await fetchServersToPing();
                 if (!targetServers.length) {
-                    message.reply('⚠️ *Tidak ada IP yang tersimpan dalam database.*');
+                    await reply(message, '⚠️ *Tidak ada IP yang tersimpan dalam database.*');
                     return;
                 }
-                const results = await Promise.all(targetServers.map(({ ip_address, server_name }) => checkPing(ip_address, server_name)));
-                message.reply(`📡 *Hasil Ping ke Semua Server:*\n${results.join('\n\n')}`);
+                // Batasi dalam batch agar tidak membebani resource jika daftar IP banyak
+                const results = await mapInBatches(targetServers, PING_BATCH_SIZE, ({ ip_address, server_name }) =>
+                    checkPing(ip_address, server_name)
+                );
+                await reply(message, `📡 *Hasil Ping ke Semua Server:*\n${results.join('\n\n')}`);
             } catch (err) {
                 console.error('Error fetching IPs from database:', err);
-                message.reply('❗ *Terjadi kesalahan saat mengambil data IP dari database.*');
+                await reply(message, '❗ *Terjadi kesalahan saat mengambil data IP dari database.*');
             }
-        } else if (lowerMessage === 'menu') {
-            const menuMessage = `📌 *Menu Perintah WhatsApp Bot*:\n` +
-                `1️⃣ _*ai: <pertanyaan>*_ \n Ajukan pertanyaan ke AI 🤖\n` +
-                `2️⃣ _*info kamar*_ \n Cek ketersediaan kamar 🏨\n` +
-                `3️⃣ _*info poli [YYYY-MM-DD]*_ \n Cek jadwal poli 📅\n` +
-                `4️⃣ _*/ping <IP_ADDRESS>*_ \n Cek koneksi ke IP tertentu 🌍\n` +
-                `5️⃣ _*ping server*_ \n Cek koneksi semua server yang ada dalam database 📡`;
-            message.reply(menuMessage);
+            return;
+        }
+
+        if (lowerMessage === 'menu' || lowerMessage === '/help' || lowerMessage === 'help') {
+            await reply(message, buildMenuMessage());
         }
     });
 };

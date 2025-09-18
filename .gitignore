@@ -1,3 +1,17 @@
-node_modules
-.wwebjs_cache
-.wwebjs_auth
+node_modules/
+.wwebjs_cache/
+.wwebjs_auth/
+
+# Env files
+.env
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS files
+.DS_Store
+Thumbs.db

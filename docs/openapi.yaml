@@ -1,0 +1,547 @@
+openapi: 3.0.3
+info:
+  title: WA Bot REST API
+  version: 1.0.0
+servers:
+  - url: /
+paths:
+  /api/status:
+    get:
+      summary: Get WhatsApp client status
+      responses:
+        '200':
+          description: Status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  ready: { type: boolean }
+                  number: { type: string, nullable: true }
+              examples:
+                ready:
+                  value:
+                    success: true
+                    ready: true
+                    number: "6281234567890"
+                notReady:
+                  value:
+                    success: true
+                    ready: false
+                    number: null
+  /api/send-text:
+    post:
+      summary: Send text message
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to, message]
+              properties:
+                to: { type: string }
+                message: { type: string }
+                type: { type: string, enum: [user, group], default: user }
+            example:
+              to: "6281234567890"
+              message: "Halo dari API"
+              type: "user"
+      responses:
+        '200':
+          description: Sent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  id: { type: string, nullable: true }
+              examples:
+                ok:
+                  value:
+                    success: true
+                    id: "ABCD1234=="
+        '400':
+          description: Bad Request - missing required fields
+          content:
+            application/json:
+              examples:
+                missingFields:
+                  value:
+                    success: false
+                    error: "Missing to or message"
+        '401':
+          description: Unauthorized - API key invalid or missing
+          content:
+            application/json:
+              examples:
+                noApiKey:
+                  value:
+                    success: false
+                    error: "Unauthorized"
+        '503':
+          description: Service Unavailable - WhatsApp client not ready
+          content:
+            application/json:
+              examples:
+                notReady:
+                  value:
+                    success: false
+                    error: "WhatsApp client not ready"
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              examples:
+                internal:
+                  value:
+                    success: false
+                    error: "Internal error"
+  /api/send-image:
+    post:
+      summary: Send image via URL or base64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to]
+              properties:
+                to: { type: string }
+                caption: { type: string }
+                imageUrl: { type: string }
+                imageBase64: { type: string }
+                mimeType: { type: string }
+                filename: { type: string }
+                type: { type: string, enum: [user, group], default: user }
+            examples:
+              viaUrl:
+                summary: Kirim via URL
+                value:
+                  to: "6281234567890"
+                  caption: "Gambar contoh"
+                  imageUrl: "https://via.placeholder.com/300.jpg"
+                  type: "user"
+              viaBase64:
+                summary: Kirim via base64
+                value:
+                  to: "6281234567890"
+                  imageBase64: "<base64>"
+                  mimeType: "image/jpeg"
+                  filename: "foto.jpg"
+                  caption: "Gambar"
+                  type: "user"
+      responses:
+        '200':
+          description: Sent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  id: { type: string, nullable: true }
+              examples:
+                ok:
+                  value:
+                    success: true
+                    id: "ABCD1234=="
+        '400':
+          description: Bad Request - missing required fields
+          content:
+            application/json:
+              examples:
+                missingImage:
+                  value:
+                    success: false
+                    error: "Missing to and imageUrl/imageBase64"
+        '401':
+          description: Unauthorized - API key invalid or missing
+          content:
+            application/json:
+              examples:
+                noApiKey:
+                  value:
+                    success: false
+                    error: "Unauthorized"
+        '503':
+          description: Service Unavailable - WhatsApp client not ready
+          content:
+            application/json:
+              examples:
+                notReady:
+                  value:
+                    success: false
+                    error: "WhatsApp client not ready"
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              examples:
+                internal:
+                  value:
+                    success: false
+                    error: "Internal error"
+  /api/send-pdf:
+    post:
+      summary: Send PDF via URL or base64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to]
+              properties:
+                to: { type: string }
+                caption: { type: string }
+                fileUrl: { type: string }
+                fileBase64: { type: string }
+                filename: { type: string }
+                type: { type: string, enum: [user, group], default: user }
+            examples:
+              viaUrl:
+                value:
+                  to: "6281234567890"
+                  fileUrl: "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf"
+                  filename: "dokumen.pdf"
+                  caption: "PDF contoh"
+                  type: "user"
+              viaBase64:
+                value:
+                  to: "6281234567890"
+                  fileBase64: "<base64>"
+                  filename: "dokumen.pdf"
+                  type: "user"
+      responses:
+        '200':
+          description: Sent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  id: { type: string, nullable: true }
+              examples:
+                ok:
+                  value:
+                    success: true
+                    id: "ABCD1234=="
+        '400':
+          description: Bad Request - missing required fields
+          content:
+            application/json:
+              examples:
+                missingPdf:
+                  value:
+                    success: false
+                    error: "Missing to and fileUrl/fileBase64"
+        '401':
+          description: Unauthorized - API key invalid or missing
+          content:
+            application/json:
+              examples:
+                noApiKey:
+                  value:
+                    success: false
+                    error: "Unauthorized"
+        '503':
+          description: Service Unavailable - WhatsApp client not ready
+          content:
+            application/json:
+              examples:
+                notReady:
+                  value:
+                    success: false
+                    error: "WhatsApp client not ready"
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              examples:
+                internal:
+                  value:
+                    success: false
+                    error: "Internal error"
+  /api/send-document:
+    post:
+      summary: Send generic document via URL or base64
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to]
+              properties:
+                to: { type: string }
+                caption: { type: string }
+                fileUrl: { type: string }
+                fileBase64: { type: string }
+                filename: { type: string }
+                mimeType: { type: string }
+                type: { type: string, enum: [user, group], default: user }
+            examples:
+              docxUrl:
+                value:
+                  to: "6281234567890"
+                  fileUrl: "https://file-examples.com/storage/fe0a40d656/example.docx"
+                  filename: "file.docx"
+                  caption: "Dokumen"
+                  type: "user"
+              base64WithMime:
+                value:
+                  to: "6281234567890"
+                  fileBase64: "<base64>"
+                  mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  filename: "file.docx"
+                  type: "user"
+      responses:
+        '200':
+          description: Sent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  id: { type: string, nullable: true }
+              examples:
+                ok:
+                  value:
+                    success: true
+                    id: "ABCD1234=="
+        '400':
+          description: Bad Request - missing required fields or invalid mimeType
+          content:
+            application/json:
+              examples:
+                missingDoc:
+                  value:
+                    success: false
+                    error: "Missing to and fileUrl/fileBase64"
+                base64NoMime:
+                  value:
+                    success: false
+                    error: "mimeType is required when sending base64"
+        '401':
+          description: Unauthorized - API key invalid or missing
+          content:
+            application/json:
+              examples:
+                noApiKey:
+                  value:
+                    success: false
+                    error: "Unauthorized"
+        '503':
+          description: Service Unavailable - WhatsApp client not ready
+          content:
+            application/json:
+              examples:
+                notReady:
+                  value:
+                    success: false
+                    error: "WhatsApp client not ready"
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              examples:
+                internal:
+                  value:
+                    success: false
+                    error: "Internal error"
+  /api/send-audio:
+    post:
+      summary: Send audio or voice note
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to]
+              properties:
+                to: { type: string }
+                caption: { type: string }
+                audioUrl: { type: string }
+                audioBase64: { type: string }
+                filename: { type: string }
+                mimeType: { type: string }
+                sendAsVoice: { type: boolean }
+                type: { type: string, enum: [user, group], default: user }
+            examples:
+              urlVoice:
+                value:
+                  to: "6281234567890"
+                  audioUrl: "https://www2.cs.uic.edu/~i101/SoundFiles/CantinaBand60.wav"
+                  filename: "voice.wav"
+                  sendAsVoice: true
+                  type: "user"
+              base64Audio:
+                value:
+                  to: "6281234567890"
+                  audioBase64: "<base64>"
+                  mimeType: "audio/ogg"
+                  filename: "voice.ogg"
+                  sendAsVoice: true
+                  type: "user"
+      responses:
+        '200':
+          description: Sent
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  id: { type: string, nullable: true }
+              examples:
+                ok:
+                  value:
+                    success: true
+                    id: "ABCD1234=="
+        '400':
+          description: Bad Request - missing required fields or invalid mimeType
+          content:
+            application/json:
+              examples:
+                missingAudio:
+                  value:
+                    success: false
+                    error: "Missing to and audioUrl/audioBase64"
+                base64NoMime:
+                  value:
+                    success: false
+                    error: "mimeType is required when sending base64"
+        '401':
+          description: Unauthorized - API key invalid or missing
+          content:
+            application/json:
+              examples:
+                noApiKey:
+                  value:
+                    success: false
+                    error: "Unauthorized"
+        '503':
+          description: Service Unavailable - WhatsApp client not ready
+          content:
+            application/json:
+              examples:
+                notReady:
+                  value:
+                    success: false
+                    error: "WhatsApp client not ready"
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              examples:
+                internal:
+                  value:
+                    success: false
+                    error: "Internal error"
+  /api/resolve-chat:
+    post:
+      summary: Resolve a number or group to chat id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                to: { type: string }
+                type: { type: string, enum: [user, group] }
+            examples:
+              resolveUser:
+                value:
+                  to: "6281234567890"
+                  type: "user"
+              resolveGroup:
+                value:
+                  to: "1203630XXXXXXXX"
+                  type: "group"
+      responses:
+        '200':
+          description: Resolved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  chatId: { type: string, nullable: true }
+                  exists: { type: boolean, nullable: true }
+                  isGroup: { type: boolean, nullable: true }
+                  name: { type: string, nullable: true }
+              examples:
+                userExists:
+                  value:
+                    success: true
+                    chatId: "6281234567890@c.us"
+                    exists: true
+                    isGroup: false
+                    name: null
+                groupExists:
+                  value:
+                    success: true
+                    chatId: "1203630XXXXXXXX@g.us"
+                    exists: true
+                    isGroup: true
+                    name: "Nama Grup"
+                notFound:
+                  value:
+                    success: true
+                    chatId: null
+                    exists: false
+                    isGroup: false
+                    name: null
+        '400':
+          description: Bad Request - invalid input
+          content:
+            application/json:
+              examples:
+                invalid:
+                  value:
+                    success: false
+                    error: "Missing to or type"
+        '401':
+          description: Unauthorized - API key invalid or missing
+          content:
+            application/json:
+              examples:
+                noApiKey:
+                  value:
+                    success: false
+                    error: "Unauthorized"
+        '503':
+          description: Service Unavailable - WhatsApp client not ready
+          content:
+            application/json:
+              examples:
+                notReady:
+                  value:
+                    success: false
+                    error: "WhatsApp client not ready"
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              examples:
+                internal:
+                  value:
+                    success: false
+                    error: "Failed to resolve number"
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: x-api-key
+security:
+  - ApiKeyAuth: []

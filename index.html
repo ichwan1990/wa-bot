@@ -1,57 +1,196 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="id" data-bs-theme="auto">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <meta name="theme-color" content="#25D366" />
+        <title>WA Bot — Scan QR</title>
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+        <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet" />
+        <script src="/socket.io/socket.io.js"></script>
+        <style>
+            body { min-height: 100vh; background: radial-gradient(1200px 600px at 10% 10%, #e9f7ef 0, transparent 60%), radial-gradient(1200px 600px at 90% 90%, #e8f1ff 0, transparent 60%); }
+            .app-card { max-width: 1100px; }
+            .qr-wrapper { background: var(--bs-body-bg); border: 1px dashed var(--bs-border-color); border-radius: 12px; position: relative; min-height: 320px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+            .qr-wrapper img { width: 100%; height: auto; max-width: 360px; }
+            .qr-overlay { position: absolute; inset: 0; display: grid; place-items: center; background: transparent; }
+            .status-badge { font-weight: 600; }
+            .logo { width: 40px; height: 40px; }
+            .pointer { cursor: pointer; }
+            .fade-slow { transition: all .25s ease; }
+            .small-muted { font-size: .9rem; color: var(--bs-secondary-color); }
+            .list-check li { margin-bottom: .5rem; }
+        </style>
+    </head>
+    <body class="d-flex align-items-center justify-content-center py-4">
+        <div class="container">
+            <div class="card shadow app-card border-0 mx-auto">
+                <div class="card-header bg-white d-flex align-items-center justify-content-between">
+                    <div class="d-flex align-items-center gap-2">
+                        <img class="logo" src="https://static.whatsapp.net/rsrc.php/v3/yl/r/2sQF5l-ob0d.png" alt="WA" />
+                        <div>
+                            <div class="fw-semibold">WA Bot — Login</div>
+                            <div class="small text-muted">Pindai QR untuk menautkan perangkat</div>
+                        </div>
+                    </div>
+                    <div class="d-flex align-items-center gap-2">
+                        <span id="statusBadge" class="badge text-bg-secondary status-badge">Menyambung...</span>
+                        <button id="themeToggle" class="btn btn-sm btn-outline-secondary" title="Tema terang/gelap"><i class="bi bi-moon-stars"></i></button>
+                    </div>
+                </div>
+                <div class="card-body p-4">
+                    <div class="row g-4 align-items-start">
+                        <!-- Left: QR panel -->
+                        <div class="col-12 col-lg-6">
+                            <div class="qr-wrapper mb-3" id="qrArea">
+                                <img id="qrcode" alt="QR Code" style="display:none;" />
+                                <div class="qr-overlay" id="qrOverlay">
+                                    <div class="text-center text-muted">
+                                        <div class="spinner-border text-success mb-3" role="status"></div>
+                                        <div>Menunggu QR Code...</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="d-flex align-items-center justify-content-between">
+                                <div class="small-muted">
+                                    <span class="me-2"><i class="bi bi-clock"></i> <span id="qrUpdated">—</span></span>
+                                    <span class="ms-2"><i class="bi bi-hdd-network"></i> <span id="clientId">Client: <span class="text-secondary">default</span></span></span>
+                                </div>
+                                <div class="d-flex gap-2">
+                                    <button id="refresh" class="btn btn-outline-primary btn-sm"><i class="bi bi-arrow-clockwise"></i> Refresh QR</button>
+                                    <button id="logout" class="btn btn-outline-danger btn-sm" style="display:none;"><i class="bi bi-box-arrow-right"></i> Logout</button>
+                                </div>
+                            </div>
+                            <div id="user-info" class="alert alert-success d-none mt-3 mb-0">
+                                <div class="d-flex align-items-center justify-content-between">
+                                    <div>
+                                        <i class="bi bi-person-vcard"></i> Nomor tertaut: <span id="phone-number" class="fw-semibold"></span>
+                                    </div>
+                                    <button id="copy-number" class="btn btn-sm btn-success"><i class="bi bi-clipboard-check"></i> Salin</button>
+                                </div>
+                            </div>
+                        </div>
+                        <!-- Right: Instructions & Help -->
+                        <div class="col-12 col-lg-6">
+                            <h5 class="mb-3">Cara menautkan WhatsApp</h5>
+                            <ol class="mb-3">
+                                <li>Buka aplikasi WhatsApp di ponsel Anda</li>
+                                <li>Pergi ke <strong>Perangkat Tertaut / Linked Devices</strong></li>
+                                <li>Ketuk <strong>Tautkan Perangkat / Link a device</strong></li>
+                                <li>Arahkan kamera ke QR code di sebelah kiri</li>
+                            </ol>
+                            <div class="small-muted mb-3">Tips: Pastikan internet stabil, layar cukup terang, dan waktu sistem tepat.</div>
 
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WhatsApp QR Code</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-    <script src="/socket.io/socket.io.js"></script>
-    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-</head>
-
-<body class="d-flex align-items-center justify-content-center vh-100">
-    <div class="container text-center">
-        <h1 class="mb-4">WhatsApp Web Login</h1>
-        <div id="status" class="alert alert-warning">Menunggu QR Code...</div>
-        <img id="qrcode" class="img-fluid border p-2" style="display:none;" alt="QR Code">
-        <div id="user-info" class="mt-3" style="display:none;">
-            <h4>Nomor Tertaut: <span id="phone-number"></span></h4>
+                            <div class="accordion" id="helpAccordion">
+                                <div class="accordion-item">
+                                    <h2 class="accordion-header" id="headingOne">
+                                        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseOne">
+                                            Troubleshooting umum
+                                        </button>
+                                    </h2>
+                                    <div id="collapseOne" class="accordion-collapse collapse" data-bs-parent="#helpAccordion">
+                                        <div class="accordion-body">
+                                            <ul class="list-check">
+                                                <li>Jika QR tidak muncul setelah 30 detik, klik <em>Refresh QR</em>.</li>
+                                                <li>Sinkronkan waktu perangkat server dan ponsel.</li>
+                                                <li>Pastikan tidak ada blokir firewall/proxy ke WhatsApp Web.</li>
+                                                <li>Jika tetap gagal, klik <em>Logout</em> lalu coba lagi.</li>
+                                            </ul>
+                                            <div class="d-flex gap-2 mt-2">
+                                                <a class="btn btn-outline-secondary btn-sm" href="/docs" target="_blank" rel="noopener"><i class="bi bi-journal-text"></i> Docs</a>
+                                                <a class="btn btn-outline-secondary btn-sm" href="/docs/swagger" target="_blank" rel="noopener"><i class="bi bi-braces"></i> Swagger</a>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
-        <button id="logout" class="btn btn-danger mt-3" style="display:none;">Logout</button>
-    </div>
 
-    <script>
-        const socket = io();
-
-        socket.on('qr', (qrImage) => {
-            document.getElementById('qrcode').src = qrImage;
-            document.getElementById('qrcode').style.display = 'block';
-            document.getElementById('status').className = 'alert alert-warning';
-            document.getElementById('status').innerText = 'Silakan scan QR Code';
-        });
-
-        socket.on('ready', () => {
-            document.getElementById('status').className = 'alert alert-success';
-            document.getElementById('status').innerText = 'WhatsApp telah terkoneksi!';
-            document.getElementById('qrcode').style.display = 'none';
-            document.getElementById('logout').style.display = 'block';
-        });
-
-        socket.on('user_info', (number) => {
-            document.getElementById('user-info').style.display = 'block';
-            document.getElementById('phone-number').innerText = number;
-        });
-
-        document.getElementById('logout').addEventListener('click', () => {
-            fetch('/logout')
-                .then(response => response.text())
-                .then(data => {
-                    alert(data);
-                    location.reload();
+        <script>
+            // Theme auto & toggle
+            (function() {
+                const key = 'wa-theme';
+                const stored = localStorage.getItem(key);
+                if (stored) document.documentElement.setAttribute('data-bs-theme', stored);
+                document.getElementById('themeToggle').addEventListener('click', () => {
+                    const current = document.documentElement.getAttribute('data-bs-theme') || 'auto';
+                    const next = current === 'dark' ? 'light' : 'dark';
+                    document.documentElement.setAttribute('data-bs-theme', next);
+                    localStorage.setItem(key, next);
                 });
-        });
-    </script>
-</body>
+            })();
 
+            const clientId = (window.CLIENT_ID || (new URLSearchParams(window.location.search).get('client') || (window.__envClientId || 'default')));
+            document.getElementById('clientId').innerHTML = 'Client: <span class="text-secondary">' + clientId + '</span>';
+
+            const socket = io();
+            const statusBadge = document.getElementById('statusBadge');
+            const qrImg = document.getElementById('qrcode');
+            const qrOverlay = document.getElementById('qrOverlay');
+            const qrUpdated = document.getElementById('qrUpdated');
+            const userInfo = document.getElementById('user-info');
+            const phoneNumberEl = document.getElementById('phone-number');
+            const logoutBtn = document.getElementById('logout');
+            const refreshBtn = document.getElementById('refresh');
+
+            function setStatus(state, message) {
+                const map = {
+                    connecting: { cls: 'text-bg-secondary', text: 'Menyambung...' },
+                    waiting:    { cls: 'text-bg-warning',   text: 'Silakan scan QR' },
+                    ready:      { cls: 'text-bg-success',   text: 'Tersambung' },
+                    error:      { cls: 'text-bg-danger',    text: 'Terjadi kesalahan' },
+                };
+                const d = map[state] || map.connecting;
+                statusBadge.className = 'badge status-badge ' + d.cls;
+                statusBadge.textContent = message || d.text;
+            }
+
+            function updateTime() {
+                const now = new Date();
+                qrUpdated.textContent = now.toLocaleTimeString();
+            }
+
+            setStatus('connecting');
+
+            socket.on('qr', (qrImage) => {
+                qrImg.src = qrImage;
+                qrImg.style.display = 'block';
+                qrOverlay.style.display = 'none';
+                setStatus('waiting');
+                updateTime();
+            });
+
+            socket.on('ready', () => {
+                setStatus('ready', 'WhatsApp tersambung');
+                qrImg.style.display = 'none';
+                qrOverlay.style.display = 'grid';
+                qrOverlay.innerHTML = '<div class="text-center text-success"><i class="bi bi-check-circle-fill fs-1"></i><div>Perangkat tertaut</div></div>';
+                logoutBtn.style.display = 'inline-block';
+            });
+
+            socket.on('user_info', (number) => {
+                userInfo.classList.remove('d-none');
+                phoneNumberEl.textContent = number;
+            });
+
+            document.getElementById('copy-number').addEventListener('click', async () => {
+                const text = phoneNumberEl.textContent.trim();
+                if (!text) return;
+                try { await navigator.clipboard.writeText(text); } catch (_) {}
+            });
+
+            refreshBtn.addEventListener('click', () => {
+                location.reload();
+            });
+
+            logoutBtn.addEventListener('click', () => {
+                fetch('/logout').then(r => r.text()).then(msg => { alert(msg); location.reload(); });
+            });
+        </script>
+        <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    </body>
 </html>
