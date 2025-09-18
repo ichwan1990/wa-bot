@@ -1,7 +1,10 @@
 const qrcode = require('qrcode');
 const { getInfoKamar } = require('./service/kamarService');
 const { getInfoPoli } = require('./service/poliService');
-const { checkPing } = require('./service/pingService');
+const { checkPing, probePing } = require('./service/pingService');
+const { buildPingReportHTML } = require('./service/reportService');
+const { renderHtmlToImage } = require('./service/renderService');
+const { mediaFromPngBuffer } = require('./utils/imageMedia');
 const { db } = require('./config/database');
 
 // -----------------------
@@ -178,14 +181,21 @@ module.exports = function setupWhatsAppClient(client, io) {
                     await reply(message, '⚠️ *Tidak ada IP yang tersimpan dalam database.*');
                     return;
                 }
-                // Batasi dalam batch agar tidak membebani resource jika daftar IP banyak
+
+                // Probe paralel dibatasi batch untuk efisiensi
                 const results = await mapInBatches(targetServers, PING_BATCH_SIZE, ({ ip_address, server_name }) =>
-                    checkPing(ip_address, server_name)
+                    probePing(ip_address, server_name)
                 );
-                await reply(message, `📡 *Hasil Ping ke Semua Server:*\n${results.join('\n\n')}`);
+
+                // Bangun HTML report dan render jadi gambar
+                const html = buildPingReportHTML(results);
+                const pngBuffer = await renderHtmlToImage(html);
+                const media = mediaFromPngBuffer(pngBuffer, 'ping-report.png');
+
+                await message.reply(media, undefined, { caption: '📡 Hasil Ping ke Semua Server' });
             } catch (err) {
-                console.error('Error fetching IPs from database:', err);
-                await reply(message, '❗ *Terjadi kesalahan saat mengambil data IP dari database.*');
+                console.error('Error generating ping report:', err);
+                await reply(message, '❗ *Terjadi kesalahan saat membuat laporan ping.*');
             }
             return;
         }
