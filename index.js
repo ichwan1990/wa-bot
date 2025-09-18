@@ -12,6 +12,10 @@ const { buildApiRouter } = require('./routes/api');
 const { requireApiKeyFactory } = require('./middlewares/auth');
 const { ensureClientReadyFactory } = require('./middlewares/ready');
 const { MySQLRemoteAuthStore, deleteRemoteSession } = require('./config/remoteAuthStore');
+const { db: dbSIMRS } = require('./config/db_simrs');
+const { db: dbSIRS } = require('./config/db_sirs');
+const { db: dbSIMPLUS } = require('./config/db_simplus');
+const { db: dbSID } = require('./config/db_sid');
 const logger = require('./utils/logger');
 const morgan = require('morgan');
 
@@ -204,8 +208,47 @@ io.on('connection', (socket) => {
 // Track legacy client readiness for API usage
 let isClientReady = false;
 if (legacyClient) {
-    legacyClient.on('ready', () => { isClientReady = true; logger.info('[legacy] ready'); });
-    legacyClient.on('disconnected', (reason) => { isClientReady = false; logger.warn('[legacy] disconnected', { reason }); });
+    let attempts = 0;
+    const scheduleReconnect = () => {
+        if (!ENABLE_LEGACY) return;
+        attempts = Math.min(attempts + 1, 10);
+        const base = 2000; // 2s
+        const max = 60000; // 60s
+        const jitter = Math.floor(Math.random() * 500);
+        const delay = Math.min(base * Math.pow(2, attempts - 1), max) + jitter;
+        logger.info('[legacy] scheduling reconnect', { delay, attempts });
+        setTimeout(() => {
+            if (!ENABLE_LEGACY) return;
+            try {
+                legacyClient = new Client({
+                    authStrategy: new RemoteAuth({
+                        clientId: process.env.CLIENT_ID || 'default',
+                        store: remoteStore,
+                        backupSyncIntervalMs: REMOTE_BACKUP_MS,
+                        dataPath: path.join(__dirname, 'session')
+                    })
+                });
+                setupWhatsAppClient(legacyClient, io, { room: null, emitUI: true });
+                wireLegacyEvents();
+                legacyClient.initialize();
+            } catch (e) {
+                logger.error('[legacy] reconnect init failed', { error: String(e?.message || e) });
+            }
+        }, delay).unref?.();
+    };
+
+    function wireLegacyEvents() {
+        legacyClient.on('ready', () => { isClientReady = true; attempts = 0; logger.info('[legacy] ready'); });
+        legacyClient.on('disconnected', (reason) => {
+            isClientReady = false;
+            logger.warn('[legacy] disconnected', { reason });
+            scheduleReconnect();
+        });
+        legacyClient.on('auth_failure', (msg) => { logger.error('[legacy] auth_failure', { msg }); });
+        legacyClient.on('change_state', (state) => { logger.info('[legacy] state', { state }); });
+    }
+
+    wireLegacyEvents();
 }
 
 // Build middlewares
@@ -301,6 +344,27 @@ app.post('/clients/:clientId/session/delete', async (req, res) => {
     }
 });
 
+// Scheduled cleanup of stale sessions (optional)
+const CLEANUP_INTERVAL_MS = Math.max(0, Number(process.env.SESSION_CLEANUP_INTERVAL_MS || 0));
+const SESSION_TTL_SECONDS = Math.max(0, Number(process.env.SESSION_TTL_SECONDS || 0));
+let cleanupTimer = null;
+function scheduleCleanup() {
+    if (!CLEANUP_INTERVAL_MS || !SESSION_TTL_SECONDS) return;
+    const run = async () => {
+        try {
+            const res = await remoteStore.deleteStaleSessions(SESSION_TTL_SECONDS);
+            if (res?.deleted) logger.info('Stale sessions cleaned', { deleted: res.deleted });
+        } catch (e) {
+            logger.warn('Stale sessions cleanup failed', { error: String(e?.message || e) });
+        }
+    };
+    cleanupTimer = setInterval(run, CLEANUP_INTERVAL_MS);
+    cleanupTimer.unref?.();
+    // Initial run (non-blocking)
+    setTimeout(run, 1000).unref?.();
+}
+scheduleCleanup();
+
 
 async function findAvailablePort(startPort, maxTries) {
     return new Promise((resolve, reject) => {
@@ -329,6 +393,33 @@ async function findAvailablePort(startPort, maxTries) {
             logger.info('Server running', { url: `http://localhost:${port}` });
             logger.info('Docs', { url: `http://localhost:${port}/docs` });
             logger.info('Swagger', { url: `http://localhost:${port}/docs/swagger` });
+
+            // Auto-start manager clients if configured
+            try {
+                const legacyId = process.env.CLIENT_ID || 'default';
+                const idsStr = process.env.AUTO_START_CLIENT_IDS || '';
+                const delayMs = Math.max(0, Number(process.env.AUTO_START_DELAY_MS || 1000));
+                const ids = idsStr.split(',').map(s => s.trim()).filter(Boolean);
+                if (ids.length) {
+                    setTimeout(async () => {
+                        for (const id of ids) {
+                            const clientId = String(id).replace(/^RemoteAuth-/, '');
+                            if (ENABLE_LEGACY && clientId === legacyId) {
+                                logger.warn('Skip auto-start for legacy clientId to avoid conflict', { clientId });
+                                continue;
+                            }
+                            try {
+                                await manager.startClient(clientId);
+                                logger.info('Auto-started client', { clientId });
+                            } catch (e) {
+                                logger.error('Auto-start failed', { clientId, error: String(e?.message || e), stack: e?.stack });
+                            }
+                        }
+                    }, delayMs).unref?.();
+                }
+            } catch (e) {
+                logger.warn('AUTO_START setup failed', { error: String(e?.message || e) });
+            }
         });
     } catch (err) {
         logger.error('Failed to bind server port', { error: String(err?.message || err), stack: err?.stack });
@@ -337,13 +428,40 @@ async function findAvailablePort(startPort, maxTries) {
 })();
 
 // Graceful shutdown
-function shutdown(signal) {
-    logger.warn('Shutting down gracefully', { signal });
+async function stopAllManagerClients() {
     try {
-        legacyClient?.destroy();
+        const ids = manager.listClients();
+        for (const id of ids) {
+            try { await manager.stopClient(id); } catch (e) { logger.warn('stopClient failed during shutdown', { id, error: String(e?.message || e) }); }
+        }
     } catch (e) {
-        logger.warn('Error during legacyClient destroy on shutdown', { error: String(e?.message || e) });
+        logger.warn('list/stop clients failed during shutdown', { error: String(e?.message || e) });
     }
+}
+
+function closeSocket() {
+    try { io.close(); } catch (e) { logger.warn('Socket close failed', { error: String(e?.message || e) }); }
+}
+
+async function shutdown(signal) {
+    logger.warn('Shutting down gracefully', { signal });
+    // Close socket first to stop new events
+    closeSocket();
+    // Stop manager clients
+    await stopAllManagerClients();
+    // Stop cleanup timer
+    try { if (cleanupTimer) clearInterval(cleanupTimer); } catch (_) {}
+    // Destroy legacy client if any
+    try { await legacyClient?.destroy(); } catch (e) { logger.warn('Error during legacyClient destroy on shutdown', { error: String(e?.message || e) }); }
+
+    // Close DB pools
+    try { dbSIMRS.end?.(); } catch (_) {}
+    try { dbSIRS.end?.(); } catch (_) {}
+    try { dbSIMPLUS.end?.(); } catch (_) {}
+    try { dbSID.end?.(); } catch (_) {}
+    try { await remoteStore.close?.(); } catch (_) {}
+
+    // Close HTTP server
     server.close(() => {
         logger.info('HTTP server closed. Bye!');
         process.exit(0);
@@ -352,8 +470,8 @@ function shutdown(signal) {
     setTimeout(() => process.exit(1), 10000).unref();
 }
 
-process.on('SIGINT', () => shutdown('SIGINT'));
-process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => { shutdown('SIGINT'); });
+process.on('SIGTERM', () => { shutdown('SIGTERM'); });
 
 // Global error logging
 process.on('unhandledRejection', (reason) => {

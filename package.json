@@ -4,7 +4,8 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon index.js"
+    "dev": "nodemon index.js",
+    "pm2" : "pm2 start index.js --name wa-bot --watch --ignore-watch=\"node_modules session .wwebjs_cache .wwebjs_auth logs\" --log-date-format=\"YYYY-MM-DD HH:mm:ss\""
   },
   "author": "",
   "license": "ISC",

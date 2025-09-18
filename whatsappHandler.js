@@ -4,11 +4,13 @@ const { getInfoPoli, getInfoPoliRows } = require('./service/poliService');
 const { checkPing, probePing } = require('./service/pingService');
 const { buildPingReportHTML } = require('./service/reportService');
 const { buildTextReportHTML } = require('./service/reportService');
+const { buildBORChartHTML, buildBORTableOnlyHTML } = require('./service/reportService');
 const { buildKamarTableHTML } = require('./service/reportService');
 const { buildPoliTableHTML } = require('./service/reportService');
 const { renderHtmlToImage } = require('./service/renderService');
 const { mediaFromPngBuffer } = require('./utils/imageMedia');
 const { db } = require('./config/db_simplus');
+const { db: dbSID } = require('./config/db_sid');
 const logger = require('./utils/logger');
 
 // -----------------------
@@ -75,8 +77,9 @@ function buildMenuMessage() {
         `2️⃣ */info poli [YYYY-MM-DD]* — Cek jadwal poli 📅 (alias: */poli* [YYYY-MM-DD], default hari ini)\n` +
         `3️⃣ */ping <IP_ADDRESS>* — Cek koneksi ke IP tertentu 🌍\n` +
         `4️⃣ */ping server* — Cek koneksi semua server dalam database 📡 (alias: */servers*)\n` +
-        `5️⃣ */help* atau */menu* — Tampilkan menu bantuan ❓\n` +
-        `6️⃣ */status* — Cek status bot & perangkat 📶`
+        `5️⃣ */bor [YYYY-MM]* — Tampilkan BOR per hari di bulan tertentu 📈 (default bulan berjalan)\n` +
+        `6️⃣ */help* atau */menu* — Tampilkan menu bantuan ❓\n` +
+        `7️⃣ */status* — Cek status bot & perangkat 📶`
     );
 }
 
@@ -136,7 +139,8 @@ module.exports = function setupWhatsAppClient(client, io, opts = {}) {
         const looksLikeLegacyCmd = (
             lowerMessage === 'menu' || lowerMessage === 'help' ||
             lowerMessage === 'info kamar' || lowerMessage.startsWith('info poli') ||
-            lowerMessage === 'ping server' || lowerMessage.startsWith('ping ') 
+            lowerMessage === 'ping server' || lowerMessage.startsWith('ping ') ||
+            lowerMessage.startsWith('bor')
         );
         if (!lowerMessage.startsWith('/') && looksLikeLegacyCmd) {
             await reply(message, 'ℹ️ Semua perintah harus diawali dengan "/". Ketik */help* untuk daftar perintah.');
@@ -251,6 +255,68 @@ module.exports = function setupWhatsAppClient(client, io, opts = {}) {
             } catch (err) {
                 logger.error('Error during ping', { error: String(err?.message || err), stack: err?.stack });
                 await reply(message, '❗ *Gagal melakukan ping ke server. Pastikan IP valid dan coba lagi!*');
+            }
+            return;
+        }
+
+        // ==========================
+        // /bor [YYYY-MM]
+        // ==========================
+        if (lowerMessage.startsWith('/bor')) {
+            // Parse parameter opsional YYYY-MM
+            let year, month;
+            const parts = lowerMessage.split(/\s+/);
+            if (parts[1]) {
+                const ym = parts[1].trim();
+                if (!/^\d{4}-\d{2}$/.test(ym)) {
+                    await reply(message, '⚠️ *Format salah.* Gunakan `YYYY-MM`, contoh: `/bor 2025-09`');
+                    return;
+                }
+                const [yy, mm] = ym.split('-').map((v) => Number(v));
+                year = yy; month = mm;
+            } else {
+                const now = new Date();
+                year = now.getFullYear();
+                month = now.getMonth() + 1; // 1-12
+            }
+
+            let chat = null;
+            try {
+                chat = await message.getChat();
+                try { await chat.sendStateTyping(); } catch (_) {}
+                try { await message.reply('⏳ Mengambil data BOR, mohon tunggu...'); } catch (_) {}
+
+                const sql = `
+                    SELECT b.tanggal,
+                           ROUND((SUM(CAST(b.hp AS DECIMAL(10, 2))) / NULLIF(SUM(CAST(b.jumlah_tt AS DECIMAL(10, 2))), 0) * 100), 1) AS bor
+                    FROM dt_bor b
+                    WHERE MONTH(b.tanggal) = ?
+                      AND YEAR(b.tanggal) = ?
+                    GROUP BY b.tanggal
+                    ORDER BY b.tanggal
+                `;
+                const [rows] = await dbSID.promise().query(sql, [month, year]);
+                if (!rows || rows.length === 0) {
+                    await reply(message, `ℹ️ Tidak ada data BOR untuk ${String(year)}-${String(month).padStart(2,'0')}.`);
+                    return;
+                }
+
+                // Kirim grafik + analisa sebagai gambar pertama
+                const chartHtml = buildBORChartHTML(rows, year, month);
+                const chartPng = await renderHtmlToImage(chartHtml);
+                const chartMedia = mediaFromPngBuffer(chartPng, 'bor-chart.png');
+                await message.reply(chartMedia, undefined, { caption: '📈 BOR Grafik & Analisa' });
+
+                // Kirim tabel BOR sebagai gambar kedua
+                const tableHtml = buildBORTableOnlyHTML(rows, year, month);
+                const tablePng = await renderHtmlToImage(tableHtml);
+                const tableMedia = mediaFromPngBuffer(tablePng, 'bor-table.png');
+                await message.reply(tableMedia, undefined, { caption: '� BOR Tabel' });
+            } catch (err) {
+                logger.error('Error fetching BOR', { error: String(err?.message || err), stack: err?.stack });
+                await reply(message, '❌ *Gagal mengambil data BOR.*');
+            } finally {
+                try { await chat?.clearState(); } catch (_) {}
             }
             return;
         }

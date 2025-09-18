@@ -164,6 +164,18 @@ class MySQLRemoteAuthStore {
     const set = new Set(rows.map(r => normalizeId(r.client_id)));
     return Array.from(set);
   }
+
+  async close() {
+    try { await this.pool.end(); } catch (_) {}
+  }
+
+  // Delete sessions older than ttlSeconds
+  async deleteStaleSessions(ttlSeconds) {
+    const ttl = Number(ttlSeconds);
+    if (!Number.isFinite(ttl) || ttl <= 0) return { deleted: 0 };
+    const [result] = await this.pool.query('DELETE FROM wwebjs_sessions WHERE updated_at < (NOW() - INTERVAL ? SECOND)', [ttl]);
+    return { deleted: result.affectedRows || 0 };
+  }
 }
 
 async function deleteRemoteSession(clientId) {

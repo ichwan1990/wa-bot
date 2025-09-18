@@ -123,6 +123,245 @@ function buildTextReportHTML(title, content) {
 module.exports.buildTextReportHTML = buildTextReportHTML;
 
 /**
+ * Tabel BOR harian: kolom (Tanggal, BOR %)
+ * @param {Array<{tanggal: Date|string, bor: number|null}>} rows
+ * @param {number} year
+ * @param {number} month
+ */
+// Build BOR Chart + Analysis (no table)
+function buildBORChartHTML(rows, year, month) {
+  const now = new Date();
+  const time = `${now.toLocaleDateString()} ${now.toLocaleTimeString()}`;
+  const title = `BOR Harian - ${String(year)}-${String(month).padStart(2,'0')}`;
+
+  const fmtDate = (v) => {
+    try {
+      if (v instanceof Date) return v.toISOString().slice(0,10);
+      const d = new Date(v);
+      if (!isNaN(d)) return d.toISOString().slice(0,10);
+      return String(v).slice(0,10);
+    } catch { return String(v).slice(0,10); }
+  };
+
+  // Aggregate summary (avg, min, max, count)
+  const nums = rows.map(r => Number(r.bor)).filter(v => Number.isFinite(v));
+  const count = rows.length;
+  const avg = nums.length ? (nums.reduce((a,b)=>a+b,0) / nums.length) : null;
+  const min = nums.length ? Math.min(...nums) : null;
+  const max = nums.length ? Math.max(...nums) : null;
+  const fmt = (v) => (v === null || v === undefined || Number.isNaN(v)) ? '-' : `${v.toFixed(1)}%`;
+  const chipClass = (v) => {
+    if (v === null || v === undefined || Number.isNaN(v)) return '';
+    if (v >= 80) return 'hi';
+    if (v >= 60) return 'mid';
+    return 'lo';
+  };
+
+  // Chart preparation (inline SVG)
+  const width = 720; // px
+  const height = 200; // px
+  const padding = { left: 36, right: 12, top: 10, bottom: 24 };
+  const plotW = width - padding.left - padding.right;
+  const plotH = height - padding.top - padding.bottom;
+  const safePoints = rows.map((r, i) => {
+    const v = Number(r.bor);
+    return Number.isFinite(v) ? { i, v } : null;
+  }).filter(Boolean);
+  const nPoints = safePoints.length;
+  const xStep = nPoints > 1 ? plotW / (nPoints - 1) : 0;
+  const yScale = (v) => padding.top + (100 - v) / 100 * plotH; // 0..100 -> bottom..top
+  const xAt = (k) => padding.left + k * xStep;
+  const pathD = nPoints ? safePoints.map((p, idx) => `${idx ? 'L' : 'M'} ${xAt(idx)} ${yScale(p.v)}`).join(' ') : '';
+  const dots = nPoints ? safePoints.map((p, idx) => `<circle cx="${xAt(idx)}" cy="${yScale(p.v)}" r="3" class="dot ${chipClass(p.v)}" />`).join('') : '';
+  // Reference lines 60% and 80%
+  const y60 = yScale(60);
+  const y80 = yScale(80);
+  const grid = `
+      <line x1="${padding.left}" y1="${y60}" x2="${width - padding.right}" y2="${y60}" class="grid mid" />
+      <line x1="${padding.left}" y1="${y80}" x2="${width - padding.right}" y2="${y80}" class="grid hi" />
+      <line x1="${padding.left}" y1="${yScale(0)}" x2="${width - padding.right}" y2="${yScale(0)}" class="grid base" />
+      <line x1="${padding.left}" y1="${yScale(100)}" x2="${width - padding.right}" y2="${yScale(100)}" class="grid top" />
+    `;
+
+  // Trend analysis
+  const daysGe80 = nums.filter(v => v >= 80).length;
+  const daysLe60 = nums.filter(v => v <= 60).length;
+  let minInfo = '-';
+  let maxInfo = '-';
+  if (nums.length) {
+    const minIdx = rows.findIndex(r => Number(r.bor) === min);
+    const maxIdx = rows.findIndex(r => Number(r.bor) === max);
+    const minDate = minIdx >= 0 ? (typeof rows[minIdx].tanggal === 'string' ? rows[minIdx].tanggal.slice(0,10) : fmtDate(rows[minIdx].tanggal)) : '-';
+    const maxDate = maxIdx >= 0 ? (typeof rows[maxIdx].tanggal === 'string' ? rows[maxIdx].tanggal.slice(0,10) : fmtDate(rows[maxIdx].tanggal)) : '-';
+    minInfo = `${fmt(min)} (${minDate})`;
+    maxInfo = `${fmt(max)} (${maxDate})`;
+  }
+  // Simple trend = slope between first and last numeric point
+  let trend = 'Stabil';
+  if (nPoints >= 2) {
+    const first = safePoints[0].v;
+    const last = safePoints[safePoints.length - 1].v;
+    const delta = last - first;
+    if (Math.abs(delta) < 1) trend = 'Stabil';
+    else trend = delta > 0 ? 'Naik' : 'Turun';
+  }
+
+  return `<!doctype html>
+  <html lang="id">
+    <head>
+      <meta charset="utf-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1" />
+      <title>${escapeHtml(title)}</title>
+      <style>
+        :root{ --bg:#fff; --text:#1f2937; --muted:#6b7280; --border:#e5e7eb; --head:#f8fafc; --ok:#10b981; --warn:#f59e0b; --bad:#ef4444; }
+        body{ margin:0; background:var(--bg); color:var(--text); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto; }
+        .wrap{ padding:16px 20px; max-width:800px; }
+        .header{ display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+        .title{ font-weight:700; font-size:18px; }
+        .time{ font-size:12px; color:var(--muted); }
+        .chip{ display:inline-block; padding:2px 8px; border-radius:999px; font-weight:700; font-size:11px; color:#fff; }
+        .chip.lo{ background:var(--ok); }
+        .chip.mid{ background:var(--warn); }
+        .chip.hi{ background:var(--bad); }
+        .stats{ display:flex; gap:8px; flex-wrap:wrap; margin:8px 0 12px; }
+        .chart{ background:#ffffff; border:1px solid var(--border); border-radius:8px; padding:8px; margin-bottom:12px; }
+        .chart svg{ width:100%; height:auto; display:block; }
+        .grid{ stroke:#e5e7eb; stroke-width:1; stroke-dasharray:4 4; }
+        .grid.mid{ stroke:var(--warn); opacity:0.6; }
+        .grid.hi{ stroke:var(--bad); opacity:0.6; }
+        .line{ fill:none; stroke:#2563eb; stroke-width:2; }
+        .dot{ stroke:#fff; stroke-width:1; }
+        .analysis{ background:#f9fafb; border:1px solid var(--border); border-radius:8px; padding:10px; margin:8px 0 12px; font-size:12px; }
+        .analysis h4{ margin:0 0 6px; font-size:13px; }
+        .analysis ul{ margin:0; padding-left:18px; }
+      </style>
+    </head>
+    <body>
+      <div class="wrap">
+        <div class="header">
+          <div class="title">${escapeHtml(title)}</div>
+          <div class="time">${escapeHtml(time)}</div>
+        </div>
+        <div class="stats">
+          <span class="chip ${chipClass(avg)}">Rata-rata: ${escapeHtml(fmt(avg))}</span>
+          <span class="chip ${chipClass(min)}">Min: ${escapeHtml(fmt(min))}</span>
+          <span class="chip ${chipClass(max)}">Max: ${escapeHtml(fmt(max))}</span>
+          <span class="chip">Hari: ${escapeHtml(String(count))}</span>
+        </div>
+        <div class="chart">
+          <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" xmlns="http://www.w3.org/2000/svg">
+            <rect x="0" y="0" width="${width}" height="${height}" fill="#fff" />
+            ${grid}
+            ${nPoints ? `<path d="${pathD}" class="line" />` : ''}
+            ${dots}
+            <!-- axes -->
+            <line x1="${padding.left}" y1="${padding.top}" x2="${padding.left}" y2="${height - padding.bottom}" stroke="#9ca3af" stroke-width="1" />
+            <line x1="${padding.left}" y1="${height - padding.bottom}" x2="${width - padding.right}" y2="${height - padding.bottom}" stroke="#9ca3af" stroke-width="1" />
+            <!-- labels -->
+            <text x="${padding.left - 6}" y="${yScale(80) - 2}" font-size="10" text-anchor="end" fill="#6b7280">80%</text>
+            <text x="${padding.left - 6}" y="${yScale(60) - 2}" font-size="10" text-anchor="end" fill="#6b7280">60%</text>
+            <text x="${padding.left - 6}" y="${yScale(0)}" font-size="10" text-anchor="end" fill="#6b7280">0%</text>
+            <text x="${padding.left - 6}" y="${yScale(100)}" font-size="10" text-anchor="end" fill="#6b7280">100%</text>
+          </svg>
+        </div>
+        <div class="analysis">
+          <h4>Analisa</h4>
+          <ul>
+            <li>Hari ≥ 80%: ${daysGe80}</li>
+            <li>Hari ≤ 60%: ${daysLe60}</li>
+            <li>Nilai maksimum: ${escapeHtml(maxInfo)}</li>
+            <li>Nilai minimum: ${escapeHtml(minInfo)}</li>
+            <li>Tren: ${trend}</li>
+          </ul>
+          <div class="subtitle">Patokan: garis merah 80%, garis oranye 60%.</div>
+        </div>
+      </div>
+    </body>
+  </html>`;
+}
+
+// Build BOR Table only
+function buildBORTableOnlyHTML(rows, year, month) {
+  const now = new Date();
+  const time = `${now.toLocaleDateString()} ${now.toLocaleTimeString()}`;
+  const title = `BOR Harian - ${String(year)}-${String(month).padStart(2,'0')}`;
+
+  const fmtDate = (v) => {
+    try {
+      if (v instanceof Date) return v.toISOString().slice(0,10);
+      const d = new Date(v);
+      if (!isNaN(d)) return d.toISOString().slice(0,10);
+      return String(v).slice(0,10);
+    } catch { return String(v).slice(0,10); }
+  };
+
+  const trs = rows.map(r => {
+    const t = fmtDate(r.tanggal);
+    const val = (r.bor === null || r.bor === undefined || Number.isNaN(Number(r.bor)))
+      ? '-'
+      : `${Number(r.bor).toFixed(1)}%`;
+    const n = Number(r.bor);
+    let cls = '';
+    if (!isNaN(n)) {
+      if (n >= 80) cls = 'hi';
+      else if (n >= 60) cls = 'mid';
+      else cls = 'lo';
+    }
+    return `
+      <tr>
+        <td>${escapeHtml(t)}</td>
+        <td><span class="chip ${cls}">${escapeHtml(val)}</span></td>
+      </tr>`;
+  }).join('');
+
+  return `<!doctype html>
+  <html lang="id">
+    <head>
+      <meta charset="utf-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1" />
+      <title>${escapeHtml(title)}</title>
+      <style>
+        :root{ --bg:#fff; --text:#1f2937; --muted:#6b7280; --border:#e5e7eb; --head:#f8fafc; --ok:#10b981; --warn:#f59e0b; --bad:#ef4444; }
+        body{ margin:0; background:var(--bg); color:var(--text); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto; }
+        .wrap{ padding:16px 20px; max-width:800px; }
+        .header{ display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+        .title{ font-weight:700; font-size:18px; }
+        .time{ font-size:12px; color:var(--muted); }
+        table.t{ width:100%; border-collapse:collapse; font-size:12px; }
+        th,td{ border-bottom:1px solid var(--border); padding:8px 10px; text-align:left; }
+        thead th{ background:var(--head); font-weight:600; }
+        tbody tr:nth-child(even){ background:#f9fafb; }
+        .chip{ display:inline-block; padding:2px 8px; border-radius:999px; font-weight:700; font-size:11px; color:#fff; }
+        .chip.lo{ background:var(--ok); }
+        .chip.mid{ background:var(--warn); }
+        .chip.hi{ background:var(--bad); }
+      </style>
+    </head>
+    <body>
+      <div class="wrap">
+        <div class="header">
+          <div class="title">${escapeHtml(title)}</div>
+          <div class="time">${escapeHtml(time)}</div>
+        </div>
+        <table class="t">
+          <thead>
+            <tr><th>Tanggal</th><th>BOR</th></tr>
+          </thead>
+          <tbody>
+            ${trs || '<tr><td colspan="2">Tidak ada data.</td></tr>'}
+          </tbody>
+        </table>
+      </div>
+    </body>
+  </html>`;
+}
+
+module.exports.buildBORChartHTML = buildBORChartHTML;
+module.exports.buildBORTableOnlyHTML = buildBORTableOnlyHTML;
+// Backward compatibility: keep old name but now returns table-only
+module.exports.buildBORTableHTML = buildBORTableOnlyHTML;
+
+/**
  * Tabel Kamar: grup per ruang, kolom (Kelas, Kosong, Terpakai, Total)
  */
 function buildKamarTableHTML(rows) {

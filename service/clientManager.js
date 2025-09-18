@@ -10,6 +10,9 @@ class ClientManager {
     this.clients = new Map(); // clientId -> client
     this.store = new MySQLRemoteAuthStore();
     this.lastQr = new Map(); // clientId -> { dataUrl, updatedAt }
+    // Reconnect/backoff tracking
+    this.desired = new Set(); // set of clientIds that should be running
+    this.retry = new Map(); // clientId -> { attempts, timer }
   }
 
   _normalize(id) {
@@ -18,6 +21,7 @@ class ClientManager {
 
   async startClient(clientId) {
     clientId = this._normalize(clientId);
+    this.desired.add(clientId);
     if (this.clients.has(clientId)) return this.clients.get(clientId);
     const REMOTE_BACKUP_MS = Math.max(60000, Number(process.env.REMOTEAUTH_BACKUP_MS || 300000));
     const client = new Client({
@@ -48,6 +52,10 @@ class ClientManager {
     if (!client) return false;
     try { await client.destroy(); } catch (_) {}
     this.clients.delete(clientId);
+    this.desired.delete(clientId);
+    const r = this.retry.get(clientId);
+    if (r?.timer) { clearTimeout(r.timer); }
+    this.retry.delete(clientId);
     return true;
   }
 
@@ -82,11 +90,43 @@ class ClientManager {
       const userInfo = client.info;
       if (userInfo?.wid?.user) this.io.to(`client:${clientId}`).emit('user_info', userInfo.wid.user);
       this.lastQr.delete(clientId);
+      // Reset retry on success
+      const r = this.retry.get(clientId);
+      if (r?.timer) clearTimeout(r.timer);
+      this.retry.delete(clientId);
     });
 
     client.on('disconnected', (reason) => {
       logger.warn('Client disconnected', { clientId, reason });
       this.io.to(`client:${clientId}`).emit('disconnected', reason);
+      // Remove stale instance to allow re-creation
+      try {
+        const current = this.clients.get(clientId);
+        if (current === client) {
+          this.clients.delete(clientId);
+        }
+      } catch (_) {}
+      // Auto-reconnect with exponential backoff if still desired
+      if (!this.desired.has(clientId)) return;
+      const prev = this.retry.get(clientId) || { attempts: 0, timer: null };
+      const attempts = Math.min(prev.attempts + 1, 10);
+      const base = 2000; // 2s
+      const max = 60000; // 60s
+      const jitter = Math.floor(Math.random() * 500);
+      const delay = Math.min(base * Math.pow(2, attempts - 1), max) + jitter;
+      if (prev.timer) clearTimeout(prev.timer);
+      const timer = setTimeout(async () => {
+        // Ensure not already running or stopped in the meantime
+        if (!this.desired.has(clientId)) return;
+        if (this.clients.has(clientId)) return;
+        try {
+          logger.info('Re-initializing client after disconnect', { clientId, attempts });
+          await this.startClient(clientId);
+        } catch (e) {
+          logger.error('Reconnect startClient failed', { clientId, error: String(e?.message || e) });
+        }
+      }, delay).unref?.() || undefined;
+      this.retry.set(clientId, { attempts, timer });
     });
 
     client.on('auth_failure', (message) => {
