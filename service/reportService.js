@@ -81,3 +81,198 @@ function escapeHtml(s) {
 }
 
 module.exports = { buildPingReportHTML };
+
+/**
+ * Bangun HTML sederhana untuk menampilkan teks preformatted sebagai gambar.
+ * @param {string} title
+ * @param {string} content
+ */
+function buildTextReportHTML(title, content) {
+  const now = new Date();
+  const time = `${now.toLocaleDateString()} ${now.toLocaleTimeString()}`;
+  const safeTitle = escapeHtml(title);
+  const safeContent = escapeHtml(content);
+  return `<!doctype html>
+  <html lang="id">
+    <head>
+      <meta charset="utf-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1" />
+      <title>${safeTitle}</title>
+      <style>
+        :root{ --bg:#ffffff; --text:#111827; --muted:#6b7280; --border:#e5e7eb; }
+        body{ margin:0; background:var(--bg); color:var(--text); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto; }
+        .wrap{ padding:16px 20px; max-width:1200px; }
+        .header{ display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+        .title{ font-weight:700; font-size:18px; }
+        .time{ font-size:12px; color:var(--muted); }
+        pre{ background:#f9fafb; border:1px solid var(--border); padding:12px; border-radius:8px; white-space:pre-wrap; word-break:break-word; font-size:13px; line-height:1.5; }
+      </style>
+    </head>
+    <body>
+      <div class="wrap">
+        <div class="header">
+          <div class="title">${safeTitle}</div>
+          <div class="time">${escapeHtml(time)}</div>
+        </div>
+        <pre>${safeContent}</pre>
+      </div>
+    </body>
+  </html>`;
+}
+
+module.exports.buildTextReportHTML = buildTextReportHTML;
+
+/**
+ * Tabel Kamar: grup per ruang, kolom (Kelas, Kosong, Terpakai, Total)
+ */
+function buildKamarTableHTML(rows) {
+  const now = new Date();
+  const time = `${now.toLocaleDateString()} ${now.toLocaleTimeString()}`;
+  const sum = rows.reduce((acc, r) => {
+    acc.kosong += Number(r.KOSONG || 0);
+    acc.terpakai += Number(r.TERPAKAI || 0);
+    acc.total += Number(r.TOTAL || 0);
+    return acc;
+  }, { kosong: 0, terpakai: 0, total: 0 });
+  // group by ruang
+  const byRuang = rows.reduce((acc, r) => {
+    const k = r.NAMA_RUANG || '-';
+    (acc[k] ||= []).push(r);
+    return acc;
+  }, {});
+
+  const sections = Object.entries(byRuang).map(([ruang, list]) => {
+    const trs = list.map(r => `
+      <tr>
+        <td>${escapeHtml(r.KELAS)}</td>
+        <td>${r.KOSONG}</td>
+        <td>${r.TERPAKAI}</td>
+        <td>${r.TOTAL}</td>
+      </tr>
+    `).join('');
+    return `
+      <h3 class="ruang">${escapeHtml(ruang)}</h3>
+      <table class="t">
+        <thead>
+          <tr><th>Kelas</th><th>Kosong</th><th>Terpakai</th><th>Total</th></tr>
+        </thead>
+        <tbody>
+          ${trs}
+        </tbody>
+      </table>
+    `;
+  }).join('\n');
+
+  return `<!doctype html>
+  <html lang="id">
+    <head>
+      <meta charset="utf-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1" />
+      <title>Informasi Kamar</title>
+      <style>
+        :root{ --bg:#fff; --text:#1f2937; --muted:#6b7280; --border:#e5e7eb; --head:#f8fafc; }
+        body{ margin:0; background:var(--bg); color:var(--text); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto; }
+        .wrap{ padding:16px 20px; max-width:1200px; }
+        .header{ display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+        .title{ font-weight:700; font-size:18px; }
+        .time{ font-size:12px; color:var(--muted); }
+        .stats{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px; }
+        .chip{ background:#eef2ff; color:#3730a3; border:1px solid #c7d2fe; padding:4px 8px; border-radius:999px; font-size:12px; font-weight:600; }
+        .chip.warn{ background:#fffbeb; color:#92400e; border-color:#fde68a; }
+        .chip.ok{ background:#ecfdf5; color:#065f46; border-color:#a7f3d0; }
+        .ruang{ margin:16px 0 6px; font-size:14px; }
+        table.t{ width:100%; border-collapse:collapse; font-size:12px; }
+        th,td{ border-bottom:1px solid var(--border); padding:8px 10px; text-align:left; }
+        thead th{ background:var(--head); font-weight:600; }
+        tbody tr:nth-child(even){ background:#f9fafb; }
+      </style>
+    </head>
+    <body>
+      <div class="wrap">
+        <div class="header">
+          <div class="title">Informasi Kamar</div>
+          <div class="time">${escapeHtml(time)}</div>
+        </div>
+        <div class="stats">
+          <span class="chip ok">Kosong: ${sum.kosong}</span>
+          <span class="chip warn">Terpakai: ${sum.terpakai}</span>
+          <span class="chip">Total: ${sum.total}</span>
+        </div>
+        ${sections || '<div class="time">Tidak ada data.</div>'}
+      </div>
+    </body>
+  </html>`;
+}
+
+/**
+ * Tabel Poli: kolom (Layanan, Dokter, Sudah, Belum, Total)
+ */
+function buildPoliTableHTML(rows, tanggal) {
+  const now = new Date();
+  const time = `${now.toLocaleDateString()} ${now.toLocaleTimeString()}`;
+  const title = `Jadwal Poli untuk ${tanggal}`;
+  const sum = rows.reduce((acc, r) => {
+    acc.sudah += Number(r.SUDAH_DILAYANI || 0);
+    acc.belum += Number(r.BELUM_DILAYANI || 0);
+    acc.total += Number(r.TOTAL_PASIEN || 0);
+    return acc;
+  }, { sudah: 0, belum: 0, total: 0 });
+  const trs = rows.map(r => `
+    <tr>
+      <td>${escapeHtml(r.LAYANAN)}</td>
+      <td>${escapeHtml(r.DOKTER)}</td>
+      <td>${r.SUDAH_DILAYANI}</td>
+      <td>${r.BELUM_DILAYANI}</td>
+      <td>${r.TOTAL_PASIEN}</td>
+    </tr>
+  `).join('');
+
+  return `<!doctype html>
+  <html lang="id">
+    <head>
+      <meta charset="utf-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1" />
+      <title>${escapeHtml(title)}</title>
+      <style>
+        :root{ --bg:#fff; --text:#111827; --muted:#6b7280; --border:#e5e7eb; --head:#f8fafc; }
+        body{ margin:0; background:var(--bg); color:var(--text); font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto; }
+        .wrap{ padding:16px 20px; max-width:1200px; }
+        .header{ display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+        .title{ font-weight:700; font-size:18px; }
+        .time{ font-size:12px; color:var(--muted); }
+        .stats{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:8px; }
+        .chip{ background:#eef2ff; color:#3730a3; border:1px solid #c7d2fe; padding:4px 8px; border-radius:999px; font-size:12px; font-weight:600; }
+        .chip.ok{ background:#ecfdf5; color:#065f46; border-color:#a7f3d0; }
+        .chip.warn{ background:#fffbeb; color:#92400e; border-color:#fde68a; }
+        table.t{ width:100%; border-collapse:collapse; font-size:12px; }
+        th,td{ border-bottom:1px solid var(--border); padding:8px 10px; text-align:left; }
+        thead th{ background:var(--head); font-weight:600; }
+        tbody tr:nth-child(even){ background:#f9fafb; }
+      </style>
+    </head>
+    <body>
+      <div class="wrap">
+        <div class="header">
+          <div class="title">${escapeHtml(title)}</div>
+          <div class="time">${escapeHtml(time)}</div>
+        </div>
+        <div class="stats">
+          <span class="chip ok">Sudah: ${sum.sudah}</span>
+          <span class="chip warn">Belum: ${sum.belum}</span>
+          <span class="chip">Total: ${sum.total}</span>
+        </div>
+        <table class="t">
+          <thead>
+            <tr><th>Layanan</th><th>Dokter</th><th>Sudah</th><th>Belum</th><th>Total</th></tr>
+          </thead>
+          <tbody>
+            ${trs}
+          </tbody>
+        </table>
+      </div>
+    </body>
+  </html>`;
+}
+
+module.exports.buildKamarTableHTML = buildKamarTableHTML;
+module.exports.buildPoliTableHTML = buildPoliTableHTML;

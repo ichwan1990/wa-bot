@@ -1,8 +1,11 @@
 const qrcode = require('qrcode');
-const { getInfoKamar } = require('./service/kamarService');
-const { getInfoPoli } = require('./service/poliService');
+const { getInfoKamar, getInfoKamarRows } = require('./service/kamarService');
+const { getInfoPoli, getInfoPoliRows } = require('./service/poliService');
 const { checkPing, probePing } = require('./service/pingService');
 const { buildPingReportHTML } = require('./service/reportService');
+const { buildTextReportHTML } = require('./service/reportService');
+const { buildKamarTableHTML } = require('./service/reportService');
+const { buildPoliTableHTML } = require('./service/reportService');
 const { renderHtmlToImage } = require('./service/renderService');
 const { mediaFromPngBuffer } = require('./utils/imageMedia');
 const { db } = require('./config/database');
@@ -67,11 +70,12 @@ async function fetchServersToPing() {
 function buildMenuMessage() {
     return (
         `📌 *Menu Perintah WhatsApp Bot*:\n` +
-        `1️⃣ _*info kamar*_ \n Cek ketersediaan kamar 🏨\n` +
-        `2️⃣ _*info poli [YYYY-MM-DD]*_ \n Cek jadwal poli 📅\n` +
-        `3️⃣ _*/ping <IP_ADDRESS>*_ \n Cek koneksi ke IP tertentu 🌍\n` +
-        `4️⃣ _*ping server*_ \n Cek koneksi semua server yang ada dalam database 📡\n` +
-        `5️⃣ _*/help*_ atau _*menu*_ \n Tampilkan menu bantuan ❓`
+        `1️⃣ */info kamar* — Cek ketersediaan kamar 🏨 (alias: */kamar*)\n` +
+        `2️⃣ */info poli [YYYY-MM-DD]* — Cek jadwal poli 📅 (alias: */poli* [YYYY-MM-DD], default hari ini)\n` +
+        `3️⃣ */ping <IP_ADDRESS>* — Cek koneksi ke IP tertentu 🌍\n` +
+        `4️⃣ */ping server* — Cek koneksi semua server dalam database 📡 (alias: */servers*)\n` +
+        `5️⃣ */help* atau */menu* — Tampilkan menu bantuan ❓\n` +
+        `6️⃣ */status* — Cek status bot & perangkat 📶`
     );
 }
 
@@ -121,61 +125,82 @@ module.exports = function setupWhatsAppClient(client, io) {
         }
         const lowerMessage = (message.body || '').toLowerCase().trim();
 
-        if (lowerMessage === 'info kamar') {
+        // Enforce semua perintah harus gunakan awalan '/'
+        const looksLikeLegacyCmd = (
+            lowerMessage === 'menu' || lowerMessage === 'help' ||
+            lowerMessage === 'info kamar' || lowerMessage.startsWith('info poli') ||
+            lowerMessage === 'ping server' || lowerMessage.startsWith('ping ') 
+        );
+        if (!lowerMessage.startsWith('/') && looksLikeLegacyCmd) {
+            await reply(message, 'ℹ️ Semua perintah harus diawali dengan "/". Ketik */help* untuk daftar perintah.');
+            return;
+        }
+
+        if (lowerMessage === '/info kamar' || lowerMessage === '/kamar') {
+            let chat = null;
             try {
-                const kamarInfo = await getInfoKamar();
-                await reply(message, `🏨 *Informasi Kamar:*\n${kamarInfo}`);
+                chat = await message.getChat();
+                try { await chat.sendStateTyping(); } catch (_) {}
+                try { await message.reply('⏳ Sedang memproses data kamar, mohon tunggu...'); } catch (_) {}
+
+                const rows = await getInfoKamarRows();
+                const html = buildKamarTableHTML(rows);
+                const pngBuffer = await renderHtmlToImage(html);
+                const media = mediaFromPngBuffer(pngBuffer, 'kamar-report.png');
+                await message.reply(media, undefined, { caption: '🏨 Informasi Kamar' });
             } catch (err) {
                 console.error('Error fetching room info:', err);
                 await reply(message, '❌ *Gagal mengambil data kamar. Silakan coba lagi nanti!*');
+            } finally {
+                try { await chat?.clearState(); } catch (_) {}
             }
             return;
         }
 
-        if (lowerMessage.startsWith('info poli')) {
+        if (lowerMessage.startsWith('/info poli') || lowerMessage.startsWith('/poli')) {
             let tanggal = new Date().toISOString().split('T')[0];
             const parts = lowerMessage.split(/\s+/);
-            if (parts.length === 3) {
-                const candidate = parts[2];
+            let candidate = null;
+            if (parts[0] === '/info' && parts[1] === 'poli' && parts[2]) {
+                candidate = parts[2];
+            } else if (parts[0] === '/poli' && parts[1]) {
+                candidate = parts[1];
+            }
+            if (candidate) {
                 if (!isValidDateStr(candidate)) {
-                    await reply(message, '⚠️ *Format tanggal tidak valid.* Gunakan format `YYYY-MM-DD`, contoh: `info poli 2025-09-17`');
+                    await reply(message, '⚠️ *Format tanggal tidak valid.* Gunakan format `YYYY-MM-DD`, contoh: `/poli 2025-09-17`');
                     return;
                 }
                 tanggal = candidate;
             }
+            let chat = null;
             try {
-                const poliInfo = await getInfoPoli(tanggal);
-                await reply(message, `🏥 *Jadwal Poli untuk ${tanggal}:*\n${poliInfo}`);
+                chat = await message.getChat();
+                try { await chat.sendStateTyping(); } catch (_) {}
+                try { await message.reply('⏳ Sedang memproses data poli, mohon tunggu...'); } catch (_) {}
+
+                const rows = await getInfoPoliRows(tanggal);
+                const html = buildPoliTableHTML(rows, tanggal);
+                const pngBuffer = await renderHtmlToImage(html);
+                const media = mediaFromPngBuffer(pngBuffer, 'poli-report.png');
+                await message.reply(media, undefined, { caption: `🏥 Jadwal Poli untuk ${tanggal}` });
             } catch (err) {
                 console.error('Error fetching poli info:', err);
                 await reply(message, '❌ *Gagal mengambil informasi poli. Silakan coba lagi nanti!*');
+            } finally {
+                try { await chat?.clearState(); } catch (_) {}
             }
             return;
         }
 
-        if (lowerMessage.startsWith('/ping')) {
-            const parts = lowerMessage.split(/\s+/);
-            const target = parts[1];
-            if (!target) {
-                await reply(message, '⚠️ *Format salah!* Gunakan: `/ping <IP_ADDRESS>`');
-                return;
-            }
-            if (!isValidHost(target)) {
-                await reply(message, '⚠️ *IP/Host tidak valid.* Contoh: `/ping 8.8.8.8`');
-                return;
-            }
+        // Pastikan '/ping server' (alias '/servers') diproses sebelum '/ping <ip>'
+        if (lowerMessage === '/ping server' || lowerMessage === '/servers') {
+            let chat = null;
             try {
-                const pingResult = await checkPing(target);
-                await reply(message, `🌍 *Hasil Ping ke ${target}:*\n${pingResult}`);
-            } catch (err) {
-                console.error('Error during ping:', err);
-                await reply(message, '❗ *Gagal melakukan ping ke server. Pastikan IP valid dan coba lagi!*');
-            }
-            return;
-        }
+                chat = await message.getChat();
+                try { await chat.sendStateTyping(); } catch (_) {}
+                try { await message.reply('⏳ Sedang memproses ping semua server, mohon tunggu...'); } catch (_) {}
 
-        if (lowerMessage === 'ping server') {
-            try {
                 const targetServers = await fetchServersToPing();
                 if (!targetServers.length) {
                     await reply(message, '⚠️ *Tidak ada IP yang tersimpan dalam database.*');
@@ -196,12 +221,62 @@ module.exports = function setupWhatsAppClient(client, io) {
             } catch (err) {
                 console.error('Error generating ping report:', err);
                 await reply(message, '❗ *Terjadi kesalahan saat membuat laporan ping.*');
+            } finally {
+                try { await chat?.clearState(); } catch (_) {}
             }
             return;
         }
 
-        if (lowerMessage === 'menu' || lowerMessage === '/help' || lowerMessage === 'help') {
+        if (lowerMessage.startsWith('/ping ')) {
+            const parts = lowerMessage.split(/\s+/);
+            const target = parts[1];
+            if (!target) {
+                await reply(message, '⚠️ *Format salah!* Gunakan: `/ping <IP_ADDRESS>`');
+                return;
+            }
+            if (!isValidHost(target)) {
+                await reply(message, '⚠️ *IP/Host tidak valid.* Contoh: `/ping 8.8.8.8`');
+                return;
+            }
+            try {
+                const pingResult = await checkPing(target);
+                await reply(message, `🌍 *Hasil Ping ke ${target}:*\n${pingResult}`);
+            } catch (err) {
+                console.error('Error during ping:', err);
+                await reply(message, '❗ *Gagal melakukan ping ke server. Pastikan IP valid dan coba lagi!*');
+            }
+            return;
+        }
+
+        if (lowerMessage === '/menu' || lowerMessage === '/help') {
             await reply(message, buildMenuMessage());
+        }
+
+        if (lowerMessage === '/status') {
+            try {
+                const info = client?.info;
+                const ready = !!info;
+                const number = info?.wid?.user || '-';
+                const servers = await fetchServersToPing();
+                const serverCount = servers?.length ?? 0;
+                const up = Math.floor(process.uptime());
+                const fmt = (s)=>{
+                    const h = Math.floor(s/3600).toString().padStart(2,'0');
+                    const m = Math.floor((s%3600)/60).toString().padStart(2,'0');
+                    const ss = Math.floor(s%60).toString().padStart(2,'0');
+                    return `${h}:${m}:${ss}`;
+                };
+                await reply(message, `📋 *Status Bot*\n` +
+                    `• WhatsApp: ${ready ? 'Ready ✅' : 'Not Ready ❌'}\n` +
+                    `• Nomor: ${number}\n` +
+                    `• Jumlah server terdaftar: ${serverCount}\n` +
+                    `• Uptime: ${fmt(up)}`
+                );
+            } catch (err) {
+                console.error('Error building status:', err);
+                await reply(message, '❗ *Gagal mengambil status.*');
+            }
+            return;
         }
     });
 };
