@@ -226,7 +226,7 @@ app.get('/clients', async (req, res) => {
 });
 
 app.get('/clients/:clientId/status', async (req, res) => {
-    const { clientId } = req.params;
+    const clientId = String(req.params.clientId).replace(/^RemoteAuth-/, '');
     const legacyId = process.env.CLIENT_ID || 'default';
     if (ENABLE_LEGACY && clientId === legacyId) {
         const number = legacyClient?.info?.wid?.user;
@@ -241,7 +241,7 @@ app.get('/clients/:clientId/status', async (req, res) => {
 });
 
 app.post('/clients/:clientId/start', async (req, res) => {
-    const { clientId } = req.params;
+    const clientId = String(req.params.clientId).replace(/^RemoteAuth-/, '');
     try {
         const legacyId = process.env.CLIENT_ID || 'default';
         if (ENABLE_LEGACY && clientId === legacyId) {
@@ -256,7 +256,7 @@ app.post('/clients/:clientId/start', async (req, res) => {
 });
 
 app.post('/clients/:clientId/stop', async (req, res) => {
-    const { clientId } = req.params;
+    const clientId = String(req.params.clientId).replace(/^RemoteAuth-/, '');
     try {
         const legacyId = process.env.CLIENT_ID || 'default';
         if (ENABLE_LEGACY && clientId === legacyId) {
@@ -272,7 +272,7 @@ app.post('/clients/:clientId/stop', async (req, res) => {
 
 // Hapus sesi (DB dan folder), hentikan client jika berjalan
 app.post('/clients/:clientId/session/delete', async (req, res) => {
-    const { clientId } = req.params;
+    const clientId = String(req.params.clientId).replace(/^RemoteAuth-/, '');
     try {
         // Hentikan client manager jika berjalan (idempotent)
         try { await manager.stopClient(clientId); } catch (e) { logger.warn('manager.stopClient failed during session delete', { clientId, error: String(e?.message || e) }); }
@@ -288,9 +288,11 @@ app.post('/clients/:clientId/session/delete', async (req, res) => {
         // Hapus dari remote store (DB)
         const deleted = await deleteRemoteSession(clientId);
 
-        // Bersihkan folder sesi lokal
-        const sessDir = path.join(__dirname, 'session', `RemoteAuth-${clientId}`);
-        try { await fs.promises.rm(sessDir, { recursive: true, force: true }); } catch (e) { logger.warn('remove session dir failed', { sessDir, error: String(e?.message || e) }); }
+        // Bersihkan folder sesi lokal (hapus baik "RemoteAuth-<id>" maupun salah satu yang ganda)
+        const sessDir1 = path.join(__dirname, 'session', `RemoteAuth-${clientId}`);
+        const sessDir2 = path.join(__dirname, 'session', `RemoteAuth-RemoteAuth-${clientId}`);
+        try { await fs.promises.rm(sessDir1, { recursive: true, force: true }); } catch (e) { logger.warn('remove session dir failed', { sessDir: sessDir1, error: String(e?.message || e) }); }
+        try { await fs.promises.rm(sessDir2, { recursive: true, force: true }); } catch (e) { logger.warn('remove session dir failed', { sessDir: sessDir2, error: String(e?.message || e) }); }
 
         return res.json({ ok: true, deleted });
     } catch (e) {

@@ -18,6 +18,11 @@ const promisePool = db.promise ? db.promise() : mysql.createPool({
 //   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 // ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+const normalizeId = (id) => {
+  if (!id) return id;
+  return String(id).replace(/^RemoteAuth-/, '');
+};
+
 class MySQLRemoteAuthStore {
   constructor() {
     this.pool = promisePool;
@@ -25,31 +30,40 @@ class MySQLRemoteAuthStore {
 
   async sessionExists(arg) {
     const key = (arg && (arg.clientId || arg.session)) || arg;
-    const [rows] = await this.pool.query('SELECT client_id FROM wwebjs_sessions WHERE client_id = ? LIMIT 1', [key]);
+    const norm = normalizeId(key);
+    const pref = `RemoteAuth-${norm}`;
+    const [rows] = await this.pool.query('SELECT client_id FROM wwebjs_sessions WHERE client_id IN (?, ?) LIMIT 1', [norm, pref]);
     return rows.length > 0;
   }
 
   async save(arg) {
     // whatsapp-web.js RemoteAuth calls save({ session }) after creating `${session}.zip` on disk.
-    const key = arg.clientId || arg.session;
+    // `arg.session` might be 'RemoteAuth-<clientId>'; store normalized key in DB, but read the zip from the exact session name.
+    const sessionKey = String(arg.clientId || arg.session);
+    const dbKey = normalizeId(sessionKey);
     const fs = require('fs');
     const path = require('path');
-    const zipPath = path.resolve(process.cwd(), `${key}.zip`);
+    const zipPath = path.resolve(process.cwd(), `${sessionKey}.zip`);
     const zipBuffer = await fs.promises.readFile(zipPath);
 
-    // Store base64 for portability
     const toStore = zipBuffer.toString('base64');
     await this.pool.query(
       'INSERT INTO wwebjs_sessions (client_id, session_json) VALUES (?, ?) ON DUPLICATE KEY UPDATE session_json = VALUES(session_json), updated_at = CURRENT_TIMESTAMP',
-      [key, toStore]
+      [dbKey, toStore]
     );
   }
 
   async load(arg) {
     // This method is not used by RemoteAuth, but keep a resilient implementation for debugging/tools
     const key = arg.clientId || arg.session || arg;
-    const [rows] = await this.pool.query('SELECT session_json FROM wwebjs_sessions WHERE client_id = ? LIMIT 1', [key]);
-    if (!rows.length) return null;
+    const norm = normalizeId(key);
+    let rows;
+    [rows] = await this.pool.query('SELECT session_json FROM wwebjs_sessions WHERE client_id = ? LIMIT 1', [norm]);
+    if (!rows.length) {
+      const pref = `RemoteAuth-${norm}`;
+      [rows] = await this.pool.query('SELECT session_json FROM wwebjs_sessions WHERE client_id = ? LIMIT 1', [pref]);
+      if (!rows.length) return null;
+    }
     const raw = rows[0].session_json;
     // Try best-effort decode
     try {
@@ -70,7 +84,9 @@ class MySQLRemoteAuthStore {
 
   async remove(arg) {
     const key = arg.clientId || arg.session || arg;
-    await this.pool.query('DELETE FROM wwebjs_sessions WHERE client_id = ?', [key]);
+    const norm = normalizeId(key);
+    const pref = `RemoteAuth-${norm}`;
+    await this.pool.query('DELETE FROM wwebjs_sessions WHERE client_id IN (?, ?)', [norm, pref]);
   }
 
   // Alias often used by RemoteAuth implementations
@@ -84,8 +100,14 @@ class MySQLRemoteAuthStore {
     const filePath = arg.path || arg.filePath || arg.target; // whatsapp-web.js passes `{ path: `${session}.zip` }`
     if (!session || !filePath) return false;
 
-    const [rows] = await this.pool.query('SELECT session_json FROM wwebjs_sessions WHERE client_id = ? LIMIT 1', [session]);
-    if (!rows.length) return false;
+    const norm = normalizeId(session);
+    let rows;
+    [rows] = await this.pool.query('SELECT session_json FROM wwebjs_sessions WHERE client_id = ? LIMIT 1', [norm]);
+    if (!rows.length) {
+      const pref = `RemoteAuth-${norm}`;
+      [rows] = await this.pool.query('SELECT session_json FROM wwebjs_sessions WHERE client_id = ? LIMIT 1', [pref]);
+      if (!rows.length) return false;
+    }
 
     const raw = rows[0].session_json;
 
@@ -139,12 +161,15 @@ class MySQLRemoteAuthStore {
   // List all stored client ids from the session table
   async listClientIds() {
     const [rows] = await this.pool.query('SELECT client_id FROM wwebjs_sessions ORDER BY updated_at DESC');
-    return rows.map(r => r.client_id);
+    const set = new Set(rows.map(r => normalizeId(r.client_id)));
+    return Array.from(set);
   }
 }
 
 async function deleteRemoteSession(clientId) {
-  const [result] = await promisePool.query('DELETE FROM wwebjs_sessions WHERE client_id = ?', [clientId]);
+  const norm = normalizeId(clientId);
+  const pref = `RemoteAuth-${norm}`;
+  const [result] = await promisePool.query('DELETE FROM wwebjs_sessions WHERE client_id IN (?, ?)', [norm, pref]);
   return result.affectedRows > 0;
 }
 

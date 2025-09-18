@@ -10,6 +10,7 @@ const { renderHtmlToImage } = require('./service/renderService');
 const { mediaFromPngBuffer } = require('./utils/imageMedia');
 const { db } = require('./config/db_simplus');
 const logger = require('./utils/logger');
+const { getUptimeByIp } = require('./service/uptimeService');
 
 // -----------------------
 // Helper & Constants
@@ -75,8 +76,9 @@ function buildMenuMessage() {
         `2️⃣ */info poli [YYYY-MM-DD]* — Cek jadwal poli 📅 (alias: */poli* [YYYY-MM-DD], default hari ini)\n` +
         `3️⃣ */ping <IP_ADDRESS>* — Cek koneksi ke IP tertentu 🌍\n` +
         `4️⃣ */ping server* — Cek koneksi semua server dalam database 📡 (alias: */servers*)\n` +
-        `5️⃣ */help* atau */menu* — Tampilkan menu bantuan ❓\n` +
-        `6️⃣ */status* — Cek status bot & perangkat 📶`
+        `5️⃣ */uptime <IP_ADDRESS>* — Lihat berapa lama server menyala ⏱️ (SNMP/sysUpTime)\n` +
+        `6️⃣ */help* atau */menu* — Tampilkan menu bantuan ❓\n` +
+        `7️⃣ */status* — Cek status bot & perangkat 📶`
     );
 }
 
@@ -251,6 +253,37 @@ module.exports = function setupWhatsAppClient(client, io, opts = {}) {
             } catch (err) {
                 logger.error('Error during ping', { error: String(err?.message || err), stack: err?.stack });
                 await reply(message, '❗ *Gagal melakukan ping ke server. Pastikan IP valid dan coba lagi!*');
+            }
+            return;
+        }
+
+        if (lowerMessage.startsWith('/uptime ')) {
+            const parts = lowerMessage.split(/\s+/);
+            const target = parts[1];
+            if (!target) {
+                await reply(message, '⚠️ *Format salah!* Gunakan: `/uptime <IP_ADDRESS>`');
+                return;
+            }
+            if (!isValidHost(target)) {
+                await reply(message, '⚠️ *IP/Host tidak valid.* Contoh: `/uptime 192.168.1.10`');
+                return;
+            }
+            let chat = null;
+            try {
+                chat = await message.getChat();
+                try { await chat.sendStateTyping(); } catch (_) {}
+                try { await message.reply('⏳ Mengecek uptime via SNMP...'); } catch (_) {}
+                const res = await getUptimeByIp(target);
+                if (!res.ok) {
+                    await reply(message, `❗ Tidak dapat mengambil uptime dari ${target}.\n• Pastikan SNMP aktif di host tersebut.\n• Community default: \`public\` (ubah via env \`SNMP_COMMUNITY\`).\n• Error: ${res.error}`);
+                    return;
+                }
+                await reply(message, `⏱️ *Uptime ${target}:* ${res.formatted} (≈ ${res.seconds} detik)`);
+            } catch (err) {
+                logger.error('Error getting uptime', { error: String(err?.message || err), stack: err?.stack });
+                await reply(message, '❗ *Gagal mengambil uptime. Pastikan host mendukung SNMP dan dapat dijangkau.*');
+            } finally {
+                try { await chat?.clearState(); } catch (_) {}
             }
             return;
         }

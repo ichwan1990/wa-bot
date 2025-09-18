@@ -12,7 +12,12 @@ class ClientManager {
     this.lastQr = new Map(); // clientId -> { dataUrl, updatedAt }
   }
 
+  _normalize(id) {
+    return String(id || '').replace(/^RemoteAuth-/, '');
+  }
+
   async startClient(clientId) {
+    clientId = this._normalize(clientId);
     if (this.clients.has(clientId)) return this.clients.get(clientId);
     const REMOTE_BACKUP_MS = Math.max(60000, Number(process.env.REMOTEAUTH_BACKUP_MS || 300000));
     const client = new Client({
@@ -38,6 +43,7 @@ class ClientManager {
   }
 
   async stopClient(clientId) {
+    clientId = this._normalize(clientId);
     const client = this.clients.get(clientId);
     if (!client) return false;
     try { await client.destroy(); } catch (_) {}
@@ -50,6 +56,7 @@ class ClientManager {
   }
 
   getStatus(clientId) {
+    clientId = this._normalize(clientId);
     const c = this.clients.get(clientId);
     if (!c) return { ready: false, exists: false };
     const info = c.info;
@@ -91,6 +98,7 @@ class ClientManager {
   }
 
   getLastQr(clientId) {
+    clientId = this._normalize(clientId);
     const v = this.lastQr.get(clientId);
     return v?.dataUrl || null;
   }
