@@ -3,7 +3,26 @@ node_modules/
 .wwebjs_auth/
 
 # Env files
-.env
+.env*
+!.env.example
+*.env.local
+*.env.test
+*.env.development
+*.env.production
+
+# Build & coverage
+coverage/
+dist/
+build/
+tmp/
+temp/
+
+# Process & cache files
+pids/
+*.pid
+*.pid.lock
+.eslintcache
+*.tsbuildinfo
 
 # Logs
 logs/
@@ -11,6 +30,10 @@ logs/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Editors & IDEs
+.vscode/
+.idea/
 
 # OS files
 .DS_Store
