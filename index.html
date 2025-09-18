@@ -321,6 +321,8 @@
                 if (row) {
                     const st = row.querySelector('.status-text');
                     if (st) st.textContent = 'Terhubung';
+                    const badge = row.querySelector('.status-badge-list');
+                    if (badge) { badge.className = 'badge rounded-pill status-badge-list text-bg-success'; badge.innerHTML = '<i class="bi bi-check-circle-fill me-1"></i>Terhubung'; }
                 }
                 if (qrModal) qrModal.hide();
             });
@@ -334,6 +336,8 @@
                     if (numEl) numEl.textContent = '📱 ' + number;
                     const st = row.querySelector('.status-text');
                     if (st) st.textContent = 'Terhubung';
+                    const badge = row.querySelector('.status-badge-list');
+                    if (badge) { badge.className = 'badge rounded-pill status-badge-list text-bg-success'; badge.innerHTML = '<i class="bi bi-check-circle-fill me-1"></i>Terhubung'; }
                 }
             });
 
@@ -350,6 +354,8 @@
                 if (row) {
                     const st = row.querySelector('.status-text');
                     if (st) st.textContent = 'Berhenti';
+                    const badge = row.querySelector('.status-badge-list');
+                    if (badge) { badge.className = 'badge rounded-pill status-badge-list text-bg-danger'; badge.innerHTML = '<i class="bi bi-x-circle-fill me-1"></i>Berhenti'; }
                 }
                 ensureQrModal().show();
             });
@@ -399,9 +405,15 @@
                     const left = document.createElement('div');
                     const right = document.createElement('div');
                     right.className = 'd-flex gap-2';
+                    const statusLabel = item.ready ? 'Terhubung' : (item.exists ? 'Berhenti' : 'Belum berjalan');
+                    const statusClass = item.ready ? 'text-bg-success' : (item.exists ? 'text-bg-danger' : 'text-bg-secondary');
+                    const statusIcon = item.ready ? 'bi-check-circle-fill' : (item.exists ? 'bi-x-circle-fill' : 'bi-circle');
                     left.innerHTML = `
                         <div class="fw-semibold">${item.clientId}</div>
-                        <div class="small text-muted"><span class="status-text">${item.ready ? 'Terhubung' : (item.exists ? 'Berhenti' : 'Belum berjalan')}</span></div>
+                        <div class="small d-flex align-items-center gap-2">
+                            <span class="badge rounded-pill status-badge-list ${statusClass}"><i class="bi ${statusIcon} me-1"></i>${statusLabel}</span>
+                            <span class="status-text d-none">${statusLabel}</span>
+                        </div>
                         <div class="small number-text">${item.number ? `📱 ${item.number}` : ''}</div>
                     `;
                     const switchBtn = document.createElement('button');
