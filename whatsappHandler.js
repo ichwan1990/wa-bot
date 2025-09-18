@@ -8,7 +8,7 @@ const { buildKamarTableHTML } = require('./service/reportService');
 const { buildPoliTableHTML } = require('./service/reportService');
 const { renderHtmlToImage } = require('./service/renderService');
 const { mediaFromPngBuffer } = require('./utils/imageMedia');
-const { db } = require('./config/database');
+const { db } = require('./config/db_simplus');
 
 // -----------------------
 // Helper & Constants
@@ -99,22 +99,28 @@ async function mapInBatches(items, batchSize, mapper) {
 }
 
 
-module.exports = function setupWhatsAppClient(client, io) {
+module.exports = function setupWhatsAppClient(client, io, opts = {}) {
+    const room = opts.room || null;
+    const emitUI = opts.emitUI !== false; // default true
     client.on('qr', async (qr) => {
+        if (!emitUI) return; // UI events handled elsewhere
         try {
             const qrImage = await qrcode.toDataURL(qr);
-            io.emit('qr', qrImage);
+            const emitter = room ? io.to(room) : io;
+            emitter.emit('qr', qrImage);
         } catch (e) {
             console.error('Failed generating QR:', e);
         }
     });
 
     client.on('ready', async () => {
+        if (!emitUI) return; // UI events handled elsewhere
         console.log('✅ Client is ready!');
-        io.emit('ready');
+        const emitter = room ? io.to(room) : io;
+        emitter.emit('ready');
         const userInfo = client.info; // client.info is a plain object
         if (userInfo && userInfo.wid && userInfo.wid.user) {
-            io.emit('user_info', userInfo.wid.user);
+            emitter.emit('user_info', userInfo.wid.user);
         }
     });
 

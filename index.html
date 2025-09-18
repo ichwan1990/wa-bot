@@ -4,9 +4,11 @@
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <meta name="theme-color" content="#25D366" />
+        <link rel="icon" type="image/png" href="assets/whatsapp.png" />
         <title>WA Bot — Scan QR</title>
         <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
         <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet" />
+    <link href="https://cdn.jsdelivr.net/npm/sweetalert2@11.14.0/dist/sweetalert2.min.css" rel="stylesheet" />
         <script src="/socket.io/socket.io.js"></script>
         <style>
             body { min-height: 100vh; background: radial-gradient(1200px 600px at 10% 10%, #e9f7ef 0, transparent 60%), radial-gradient(1200px 600px at 90% 90%, #e8f1ff 0, transparent 60%); }
@@ -27,7 +29,7 @@
             <div class="card shadow app-card border-0 mx-auto">
                 <div class="card-header bg-white d-flex align-items-center justify-content-between">
                     <div class="d-flex align-items-center gap-2">
-                        <img class="logo" src="https://static.whatsapp.net/rsrc.php/v3/yl/r/2sQF5l-ob0d.png" alt="WA" />
+                        <img class="logo" src="assets/whatsapp.png" alt="WA" />
                         <div>
                             <div class="fw-semibold">WA Bot — Login</div>
                             <div class="small text-muted">Pindai QR untuk menautkan perangkat</div>
@@ -40,37 +42,31 @@
                 </div>
                 <div class="card-body p-4">
                     <div class="row g-4 align-items-start">
-                        <!-- Left: QR panel -->
+                        <!-- Right: Accounts -->
                         <div class="col-12 col-lg-6">
-                            <div class="qr-wrapper mb-3" id="qrArea">
-                                <img id="qrcode" alt="QR Code" style="display:none;" />
-                                <div class="qr-overlay" id="qrOverlay">
-                                    <div class="text-center text-muted">
-                                        <div class="spinner-border text-success mb-3" role="status"></div>
-                                        <div>Menunggu QR Code...</div>
+                            <div class="card mb-3">
+                                <div class="card-header bg-white d-flex align-items-center justify-content-between">
+                                    <span class="fw-semibold"><i class="bi bi-people"></i> Akun Terhubung</span>
+                                    <div class="d-flex gap-2">
+                                        <button id="refreshClients" class="btn btn-sm btn-outline-primary"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
                                     </div>
                                 </div>
-                            </div>
-                            <div class="d-flex align-items-center justify-content-between">
-                                <div class="small-muted">
-                                    <span class="me-2"><i class="bi bi-clock"></i> <span id="qrUpdated">—</span></span>
-                                    <span class="ms-2"><i class="bi bi-hdd-network"></i> <span id="clientId">Client: <span class="text-secondary">default</span></span></span>
-                                </div>
-                                <div class="d-flex gap-2">
-                                    <button id="refresh" class="btn btn-outline-primary btn-sm"><i class="bi bi-arrow-clockwise"></i> Refresh QR</button>
-                                    <button id="logout" class="btn btn-outline-danger btn-sm" style="display:none;"><i class="bi bi-box-arrow-right"></i> Logout</button>
-                                </div>
-                            </div>
-                            <div id="user-info" class="alert alert-success d-none mt-3 mb-0">
-                                <div class="d-flex align-items-center justify-content-between">
-                                    <div>
-                                        <i class="bi bi-person-vcard"></i> Nomor tertaut: <span id="phone-number" class="fw-semibold"></span>
+                                <div class="card-body">
+                                    <div class="mb-3">
+                                        <label for="addClientId" class="form-label">Tambah Akun (Client ID)</label>
+                                        <div class="input-group">
+                                            <input id="addClientId" class="form-control" placeholder="contoh: akun-1" />
+                                            <button id="btnAddClient" class="btn btn-success"><i class="bi bi-plus-circle"></i> Tambah</button>
+                                        </div>
+                                        <div class="form-text">Client ID hanya boleh huruf/angka, garis bawah, atau tanda minus.</div>
                                     </div>
-                                    <button id="copy-number" class="btn btn-sm btn-success"><i class="bi bi-clipboard-check"></i> Salin</button>
+                                    <div id="clientsContainer">
+                                        <div class="text-muted">Memuat daftar akun…</div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
-                        <!-- Right: Instructions & Help -->
+                        <!-- Right: Instructions & Help next to Accounts -->
                         <div class="col-12 col-lg-6">
                             <h5 class="mb-3">Cara menautkan WhatsApp</h5>
                             <ol class="mb-3">
@@ -91,7 +87,7 @@
                                     <div id="collapseOne" class="accordion-collapse collapse" data-bs-parent="#helpAccordion">
                                         <div class="accordion-body">
                                             <ul class="list-check">
-                                                <li>Jika QR tidak muncul setelah 30 detik, klik <em>Refresh QR</em>.</li>
+                                                <li>Jika QR tidak muncul setelah 30 detik, klik <em>QR Baru</em>.</li>
                                                 <li>Sinkronkan waktu perangkat server dan ponsel.</li>
                                                 <li>Pastikan tidak ada blokir firewall/proxy ke WhatsApp Web.</li>
                                                 <li>Jika tetap gagal, klik <em>Logout</em> lalu coba lagi.</li>
@@ -104,6 +100,39 @@
                                     </div>
                                 </div>
                             </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- QR Modal -->
+        <div class="modal fade" id="qrModal" tabindex="-1" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title"><i class="bi bi-qr-code"></i> Scan QR</h5>
+                        <div class="ms-2 small text-muted"><span id="clientId">Client: <span class="text-secondary">default</span></span></div>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="qr-wrapper" id="qrArea">
+                            <img id="qrcode" alt="QR Code" style="display:none;" />
+                            <div class="qr-overlay" id="qrOverlay">
+                                <div class="text-center text-muted">
+                                    <div class="mb-2"><i class="bi bi-qr-code fs-1"></i></div>
+                                    <div>Pilih akun atau klik <em>Tambah</em> untuk menampilkan QR.</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer justify-content-between">
+                        <div class="small-muted">
+                            <span class="me-2"><i class="bi bi-clock"></i> <span id="qrUpdated">—</span></span>
+                        </div>
+                        <div class="d-flex gap-2 align-items-center">
+                            <button id="btnRefreshQR" class="btn btn-outline-primary btn-sm" style="display:none;"><i class="bi bi-arrow-clockwise"></i> QR Baru</button>
+                            <button id="logout" class="btn btn-outline-danger btn-sm" style="display:none;"><i class="bi bi-box-arrow-right"></i> Logout</button>
                         </div>
                     </div>
                 </div>
@@ -124,10 +153,10 @@
                 });
             })();
 
-            const clientId = (window.CLIENT_ID || (new URLSearchParams(window.location.search).get('client') || (window.__envClientId || 'default')));
-            document.getElementById('clientId').innerHTML = 'Client: <span class="text-secondary">' + clientId + '</span>';
-
             const socket = io();
+            const urlClient = new URLSearchParams(location.search).get('client');
+            let clientId = urlClient || 'default';
+            // DOM refs used across flows (declare early)
             const statusBadge = document.getElementById('statusBadge');
             const qrImg = document.getElementById('qrcode');
             const qrOverlay = document.getElementById('qrOverlay');
@@ -135,7 +164,86 @@
             const userInfo = document.getElementById('user-info');
             const phoneNumberEl = document.getElementById('phone-number');
             const logoutBtn = document.getElementById('logout');
-            const refreshBtn = document.getElementById('refresh');
+            const btnRefreshQR = document.getElementById('btnRefreshQR');
+            const qrModalEl = document.getElementById('qrModal');
+            let qrModal = null;
+            function ensureQrModal() {
+                if (!qrModal) {
+                    qrModal = new bootstrap.Modal(qrModalEl, { backdrop: 'static', keyboard: false });
+                }
+                return qrModal;
+            }
+            const applyClient = (id) => {
+                document.getElementById('clientId').innerHTML = 'Client: <span class="text-secondary">' + clientId + '</span>';
+                const statusBadge = document.getElementById('statusBadge');
+                if (!document.getElementById('remoteAuthBadge')) {
+                    statusBadge.insertAdjacentHTML('afterend', '<span id="remoteAuthBadge" class="badge text-bg-info ms-2">RemoteAuth</span>');
+                }
+            };
+                const joinRoom = () => { try { socket.emit('join', { clientId }); } catch(_) {} };
+                if (!urlClient) {
+                fetch('/auth/info').then(r=>r.json()).then(info => {
+                    clientId = info.clientId || clientId;
+                    applyClient(clientId);
+                    joinRoom();
+                }).catch(() => applyClient(clientId));
+            } else {
+                applyClient(clientId);
+                joinRoom();
+                // Tampilkan indikator menunggu QR untuk client yang dipilih
+                try {
+                    qrImg.style.display = 'none';
+                    qrOverlay.style.display = 'grid';
+                    qrOverlay.innerHTML = '<div class="text-center text-muted"><div class="spinner-border text-success mb-3" role="status"></div><div>Menunggu QR Code...</div></div>';
+                    setStatus('waiting');
+                    btnRefreshQR.style.display = 'inline-block';
+                    qrAutoRetries = 0;
+                    scheduleQrAutoRefresh();
+                    ensureQrModal().show();
+                } catch (_) {}
+                // Fetch auth info (no API key required)
+                fetch('/auth/info').catch(() => {});
+            }
+
+            // refs already declared above
+
+            let qrWaitTimer = null;
+            let qrAutoRetries = 0;
+            const MAX_QR_AUTO_RETRIES = 2;
+
+            function clearQrTimer() {
+                if (qrWaitTimer) { try { clearTimeout(qrWaitTimer); } catch(_) {} qrWaitTimer = null; }
+            }
+
+            async function refreshQR(force = false) {
+                try {
+                    if (!clientId) return;
+                    await fetch('/clients/' + encodeURIComponent(clientId) + '/stop', { method: 'POST' });
+                    const r = await fetch('/clients/' + encodeURIComponent(clientId) + '/start', { method: 'POST' });
+                    const j = await r.json();
+                    if (!j.ok) {
+                        Swal.fire({ icon: 'error', title: 'Gagal', text: j.error || 'Tidak diketahui' });
+                        return;
+                    }
+                    qrImg.style.display = 'none';
+                    qrOverlay.style.display = 'grid';
+                    qrOverlay.innerHTML = '<div class="text-center text-muted"><div class="spinner-border text-success mb-3" role="status"></div><div>Menunggu QR Code...</div></div>';
+                    setStatus('waiting');
+                    btnRefreshQR.style.display = 'inline-block';
+                    scheduleQrAutoRefresh();
+                } catch (e) {
+                    Swal.fire({ icon: 'error', title: 'Gagal', text: e.message || String(e) });
+                }
+            }
+
+            function scheduleQrAutoRefresh() {
+                clearQrTimer();
+                if (qrAutoRetries >= MAX_QR_AUTO_RETRIES) return;
+                qrWaitTimer = setTimeout(async () => {
+                    qrAutoRetries++;
+                    await refreshQR(true);
+                }, 30000);
+            }
 
             function setStatus(state, message) {
                 const map = {
@@ -155,13 +263,49 @@
             }
 
             setStatus('connecting');
+            async function selectClient(id) {
+                if (!id) return;
+                clientId = id;
+                applyClient(clientId);
+                try { socket.emit('join', { clientId }); } catch(_) {}
+                try {
+                    qrImg.style.display = 'none';
+                    qrOverlay.style.display = 'grid';
+                    qrOverlay.innerHTML = '<div class="text-center text-muted"><div class="spinner-border text-success mb-3" role="status"></div><div>Menunggu QR Code...</div></div>';
+                    setStatus('waiting');
+                    btnRefreshQR.style.display = 'inline-block';
+                    qrAutoRetries = 0;
+                    scheduleQrAutoRefresh();
+                    ensureQrModal().show();
+                } catch(_) {}
+                // Update URL without reload
+                const params = new URLSearchParams(location.search);
+                params.set('client', id);
+                const newUrl = location.pathname + '?' + params.toString();
+                window.history.replaceState(null, '', newUrl);
+                fetch('/auth/info').catch(() => {});
+                // If already ready, close modal quickly
+                try {
+                    const s = await fetch('/clients/' + encodeURIComponent(id) + '/status');
+                    const sj = await s.json();
+                    if (sj && sj.ready) {
+                        setStatus('ready', 'WhatsApp tersambung');
+                        btnRefreshQR.style.display = 'none';
+                        if (qrModal) qrModal.hide();
+                    }
+                } catch(_) {}
+            }
 
             socket.on('qr', (qrImage) => {
                 qrImg.src = qrImage;
                 qrImg.style.display = 'block';
                 qrOverlay.style.display = 'none';
                 setStatus('waiting');
+                btnRefreshQR.style.display = 'inline-block';
+                clearQrTimer();
+                qrAutoRetries = 0;
                 updateTime();
+                ensureQrModal().show();
             });
 
             socket.on('ready', () => {
@@ -170,27 +314,257 @@
                 qrOverlay.style.display = 'grid';
                 qrOverlay.innerHTML = '<div class="text-center text-success"><i class="bi bi-check-circle-fill fs-1"></i><div>Perangkat tertaut</div></div>';
                 logoutBtn.style.display = 'inline-block';
+                btnRefreshQR.style.display = 'none';
+                clearQrTimer();
+                qrAutoRetries = 0;
+                const row = document.getElementById('client-row-' + clientId);
+                if (row) {
+                    const st = row.querySelector('.status-text');
+                    if (st) st.textContent = 'Terhubung';
+                }
+                if (qrModal) qrModal.hide();
             });
 
             socket.on('user_info', (number) => {
-                userInfo.classList.remove('d-none');
-                phoneNumberEl.textContent = number;
+                if (userInfo) userInfo.classList.remove('d-none');
+                if (phoneNumberEl) phoneNumberEl.textContent = number;
+                const row = document.getElementById('client-row-' + clientId);
+                if (row) {
+                    const numEl = row.querySelector('.number-text');
+                    if (numEl) numEl.textContent = '📱 ' + number;
+                    const st = row.querySelector('.status-text');
+                    if (st) st.textContent = 'Terhubung';
+                }
             });
 
-            document.getElementById('copy-number').addEventListener('click', async () => {
-                const text = phoneNumberEl.textContent.trim();
-                if (!text) return;
-                try { await navigator.clipboard.writeText(text); } catch (_) {}
+            socket.on('disconnected', (reason) => {
+                setStatus('error', 'Terputus');
+                try {
+                    qrImg.style.display = 'none';
+                    qrOverlay.style.display = 'grid';
+                    qrOverlay.innerHTML = '<div class="text-center text-danger"><i class="bi bi-x-circle-fill fs-1"></i><div>Terputus</div></div>';
+                    logoutBtn.style.display = 'none';
+                    btnRefreshQR.style.display = 'inline-block';
+                } catch (_) {}
+                const row = document.getElementById('client-row-' + clientId);
+                if (row) {
+                    const st = row.querySelector('.status-text');
+                    if (st) st.textContent = 'Berhenti';
+                }
+                ensureQrModal().show();
             });
 
-            refreshBtn.addEventListener('click', () => {
-                location.reload();
+            const copyNumberBtn = document.getElementById('copy-number');
+            if (copyNumberBtn && phoneNumberEl) {
+                copyNumberBtn.addEventListener('click', async () => {
+                    const text = phoneNumberEl.textContent.trim();
+                    if (!text) return;
+                    try { await navigator.clipboard.writeText(text); } catch (_) {}
+                });
+            }
+
+        logoutBtn.addEventListener('click', () => {
+                fetch('/logout?clientId=' + encodeURIComponent(clientId))
+            .then(r => r.text())
+            .then(msg => { Swal.fire({ icon: 'info', title: 'Logout', text: msg }).then(()=>location.reload()); });
+            });
+            // API key tidak diperlukan di halaman ini.
+
+            btnRefreshQR.addEventListener('click', async () => {
+                qrAutoRetries = 0;
+                await refreshQR(true);
             });
 
-            logoutBtn.addEventListener('click', () => {
-                fetch('/logout').then(r => r.text()).then(msg => { alert(msg); location.reload(); });
+            // ==========================
+            // Accounts list + add form
+            // ==========================
+            const clientsContainer = document.getElementById('clientsContainer');
+            const refreshClientsBtn = document.getElementById('refreshClients');
+            const addClientInput = document.getElementById('addClientId');
+            const addClientBtn = document.getElementById('btnAddClient');
+
+            const idRegex = /^[-_\w]+$/i;
+
+            function renderClients(list) {
+                if (!list || !list.length) {
+                    clientsContainer.innerHTML = '<div class="text-muted">Belum ada client yang berjalan. Tambahkan client baru untuk memulai.</div>';
+                    return;
+                }
+                const wrap = document.createElement('div');
+                wrap.className = 'list-group';
+                list.forEach(item => {
+                    const row = document.createElement('div');
+                    row.className = 'list-group-item d-flex justify-content-between align-items-center';
+                    row.id = 'client-row-' + item.clientId;
+                    const left = document.createElement('div');
+                    const right = document.createElement('div');
+                    right.className = 'd-flex gap-2';
+                    left.innerHTML = `
+                        <div class="fw-semibold">${item.clientId}</div>
+                        <div class="small text-muted"><span class="status-text">${item.ready ? 'Terhubung' : (item.exists ? 'Berhenti' : 'Belum berjalan')}</span></div>
+                        <div class="small number-text">${item.number ? `📱 ${item.number}` : ''}</div>
+                    `;
+                    const switchBtn = document.createElement('button');
+                    switchBtn.className = 'btn btn-sm btn-outline-secondary';
+                    switchBtn.innerHTML = '<i class="bi bi-arrow-left-right"></i> Switch';
+                    switchBtn.onclick = () => { selectClient(item.clientId); };
+                    right.appendChild(switchBtn);
+                    if (item.ready) {
+                        const stop = document.createElement('button');
+                        stop.className = 'btn btn-sm btn-outline-warning';
+                        stop.innerHTML = '<i class="bi bi-stop"></i> Stop';
+                        stop.onclick = async () => {
+                            const r = await fetch('/clients/' + encodeURIComponent(item.clientId) + '/stop', { method: 'POST' });
+                            const j = await r.json();
+                            if (!j.ok) Swal.fire({ icon: 'error', title: 'Gagal', text: j.error||'Tidak diketahui' });
+                            else Swal.fire({ icon: 'success', title: 'Berhasil', text: 'Client dihentikan.' });
+                            loadClients();
+                        };
+                        right.appendChild(stop);
+                        const del = document.createElement('button');
+                        del.className = 'btn btn-sm btn-outline-danger';
+                        del.innerHTML = '<i class="bi bi-trash"></i> Hapus Sesi';
+                        del.onclick = async () => {
+                            const ask = await Swal.fire({ icon: 'warning', title: 'Hapus sesi?', text: 'Ini akan memaksa login ulang untuk ' + item.clientId, showCancelButton: true, confirmButtonText: 'Ya, hapus', cancelButtonText: 'Batal' });
+                            if (!ask.isConfirmed) return;
+                            const r = await fetch('/clients/' + encodeURIComponent(item.clientId) + '/session/delete', { method: 'POST' });
+                            const j = await r.json();
+                            if (!j.ok) Swal.fire({ icon: 'error', title: 'Gagal', text: j.error||'Tidak diketahui' });
+                            else Swal.fire({ icon: 'success', title: 'Berhasil', text: 'Sesi dihapus.' });
+                            loadClients();
+                        };
+                        right.appendChild(del);
+                    } else if (!item.exists) {
+                        const start = document.createElement('button');
+                        start.className = 'btn btn-sm btn-outline-success';
+                        start.innerHTML = '<i class="bi bi-play"></i> Start';
+                        start.onclick = async () => {
+                            const r = await fetch('/clients/' + encodeURIComponent(item.clientId) + '/start', { method: 'POST' });
+                            const j = await r.json();
+                            if (!j.ok) Swal.fire({ icon: 'error', title: 'Gagal', text: j.error||'Tidak diketahui' });
+                            else {
+                                // Tampilkan modal QR tanpa reload
+                                selectClient(item.clientId);
+                                Swal.fire({ icon: 'success', title: 'Berhasil', text: 'Client dimulai.' });
+                            }
+                            loadClients();
+                        };
+                        right.appendChild(start);
+                    } else {
+                        // exists tapi belum ready (stopped): sediakan Start dan Hapus Sesi
+                        const start = document.createElement('button');
+                        start.className = 'btn btn-sm btn-outline-success';
+                        start.innerHTML = '<i class="bi bi-play"></i> Start';
+                        start.onclick = async () => {
+                            const r = await fetch('/clients/' + encodeURIComponent(item.clientId) + '/start', { method: 'POST' });
+                            const j = await r.json();
+                            if (!j.ok) Swal.fire({ icon: 'error', title: 'Gagal', text: j.error||'Tidak diketahui' });
+                            else {
+                                selectClient(item.clientId);
+                                Swal.fire({ icon: 'success', title: 'Berhasil', text: 'Client dimulai.' });
+                            }
+                            loadClients();
+                        };
+                        right.appendChild(start);
+
+                        const del = document.createElement('button');
+                        del.className = 'btn btn-sm btn-outline-danger';
+                        del.innerHTML = '<i class="bi bi-trash"></i> Hapus Sesi';
+                        del.onclick = async () => {
+                            const ask = await Swal.fire({ icon: 'warning', title: 'Hapus sesi?', text: 'Ini akan memaksa login ulang untuk ' + item.clientId, showCancelButton: true, confirmButtonText: 'Ya, hapus', cancelButtonText: 'Batal' });
+                            if (!ask.isConfirmed) return;
+                            const r = await fetch('/clients/' + encodeURIComponent(item.clientId) + '/session/delete', { method: 'POST' });
+                            const j = await r.json();
+                            if (!j.ok) Swal.fire({ icon: 'error', title: 'Gagal', text: j.error||'Tidak diketahui' });
+                            else Swal.fire({ icon: 'success', title: 'Berhasil', text: 'Sesi dihapus.' });
+                            loadClients();
+                        };
+                        right.appendChild(del);
+                    }
+                    row.appendChild(left);
+                    row.appendChild(right);
+                    wrap.appendChild(row);
+                });
+                clientsContainer.innerHTML = '';
+                clientsContainer.appendChild(wrap);
+            }
+
+            async function loadClients() {
+                try {
+                    const r = await fetch('/clients');
+                    if (!r.ok) throw new Error('Gagal memuat daftar clients');
+                    const j = await r.json();
+                    const ids = Array.isArray(j.clients) ? j.clients : [];
+                    if (!ids.length) {
+                        renderClients([]);
+                        // Auto-start default client (opsional, konfirmasi)
+                        if (!window.__askedAutoStartDefault) {
+                            window.__askedAutoStartDefault = true;
+                            const ask = await Swal.fire({
+                                icon: 'question',
+                                title: 'Mulai client default?',
+                                text: 'Daftar akun kosong. Mulai client default sekarang untuk menampilkan QR?',
+                                showCancelButton: true,
+                                confirmButtonText: 'Mulai',
+                                cancelButtonText: 'Nanti'
+                            });
+                            if (ask.isConfirmed) {
+                                try {
+                                    const defId = 'default';
+                                    const resp = await fetch('/clients/' + encodeURIComponent(defId) + '/start', { method: 'POST' });
+                                    const jr = await resp.json();
+                                    if (jr.ok) {
+                                        const params = new URLSearchParams(location.search);
+                                        params.set('client', defId);
+                                        location.search = params.toString();
+                                    } else {
+                                        Swal.fire({ icon: 'error', title: 'Gagal', text: jr.error || 'Tidak diketahui' });
+                                    }
+                                } catch (e) {
+                                    Swal.fire({ icon: 'error', title: 'Gagal', text: e.message || String(e) });
+                                }
+                            }
+                        }
+                        return;
+                    }
+                    const statuses = await Promise.all(ids.map(async id => {
+                        try {
+                            const s = await fetch('/clients/' + encodeURIComponent(id) + '/status');
+                            const sj = await s.json();
+                            return { clientId: id, ...sj };
+                        } catch {
+                            return { clientId: id, ready: false, exists: true };
+                        }
+                    }));
+                    renderClients(statuses);
+                } catch (e) {
+                    clientsContainer.innerHTML = '<div class="text-danger">Gagal memuat daftar akun. Pastikan API Key benar jika server mengaktifkan proteksi.</div>';
+                }
+            }
+
+            refreshClientsBtn.addEventListener('click', async () => { await loadClients(); Swal.fire({ icon: 'success', title: 'Diperbarui', timer: 900, showConfirmButton: false }); });
+            setInterval(loadClients, 15000);
+            // Initial load: try earlier, may be retried after /auth/info sets API key
+            setTimeout(loadClients, 1200);
+
+            addClientBtn.addEventListener('click', async () => {
+                const id = (addClientInput.value || '').trim();
+                if (!id) return Swal.fire({ icon: 'warning', title: 'Perhatian', text: 'Masukkan Client ID' });
+                if (!idRegex.test(id)) return Swal.fire({ icon: 'warning', title: 'Perhatian', text: 'Client ID hanya boleh huruf/angka, underscore, atau minus' });
+                try {
+                    const r = await fetch('/clients/' + encodeURIComponent(id) + '/start', { method: 'POST' });
+                    const j = await r.json();
+                    if (!j.ok) return Swal.fire({ icon: 'error', title: 'Gagal', text: j.error||'Tidak diketahui' });
+                    addClientInput.value = '';
+                    loadClients();
+                    // Langsung tampilkan modal QR tanpa reload
+                    selectClient(id);
+                } catch (e) {
+                    Swal.fire({ icon: 'error', title: 'Gagal', text: e.message || String(e) });
+                }
             });
         </script>
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11.14.0/dist/sweetalert2.all.min.js"></script>
     </body>
 </html>
