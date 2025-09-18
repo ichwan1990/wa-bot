@@ -2,12 +2,14 @@ const { Client, RemoteAuth } = require('whatsapp-web.js');
 const path = require('path');
 const { MySQLRemoteAuthStore } = require('../config/remoteAuthStore');
 const setupWhatsAppClient = require('../whatsappHandler');
+const logger = require('../utils/logger');
 
 class ClientManager {
   constructor(io) {
     this.io = io;
     this.clients = new Map(); // clientId -> client
     this.store = new MySQLRemoteAuthStore();
+    this.lastQr = new Map(); // clientId -> { dataUrl, updatedAt }
   }
 
   async startClient(clientId) {
@@ -27,7 +29,7 @@ class ClientManager {
     try {
       setupWhatsAppClient(client, this.io, { room: `client:${clientId}`, emitUI: false });
     } catch (e) {
-      console.error('Failed to setup handlers for client', clientId, e);
+      logger.error('Failed to setup handlers for client', { clientId, error: String(e?.message || e), stack: e?.stack });
     }
 
     await client.initialize();
@@ -60,22 +62,37 @@ class ClientManager {
         const qrcode = require('qrcode');
         const qrImage = await qrcode.toDataURL(qr);
         this.io.to(`client:${clientId}`).emit('qr', qrImage);
+        logger.info('QR generated', { clientId });
+        this.lastQr.set(clientId, { dataUrl: qrImage, updatedAt: Date.now() });
       } catch (e) {
-        console.error('QR gen error:', e);
+        logger.error('QR gen error', { clientId, error: String(e?.message || e), stack: e?.stack });
       }
     });
 
     client.on('ready', async () => {
-      console.log(`[${clientId}] ready`);
+      logger.info('Client ready', { clientId });
       this.io.to(`client:${clientId}`).emit('ready');
       const userInfo = client.info;
       if (userInfo?.wid?.user) this.io.to(`client:${clientId}`).emit('user_info', userInfo.wid.user);
+      this.lastQr.delete(clientId);
     });
 
     client.on('disconnected', (reason) => {
-      console.warn(`[${clientId}] disconnected:`, reason);
+      logger.warn('Client disconnected', { clientId, reason });
       this.io.to(`client:${clientId}`).emit('disconnected', reason);
     });
+
+    client.on('auth_failure', (message) => {
+      logger.error('Client auth_failure', { clientId, message });
+    });
+    client.on('change_state', (state) => {
+      logger.info('Client state changed', { clientId, state });
+    });
+  }
+
+  getLastQr(clientId) {
+    const v = this.lastQr.get(clientId);
+    return v?.dataUrl || null;
   }
 }
 

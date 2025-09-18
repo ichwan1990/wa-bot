@@ -12,6 +12,8 @@ const { buildApiRouter } = require('./routes/api');
 const { requireApiKeyFactory } = require('./middlewares/auth');
 const { ensureClientReadyFactory } = require('./middlewares/ready');
 const { MySQLRemoteAuthStore, deleteRemoteSession } = require('./config/remoteAuthStore');
+const logger = require('./utils/logger');
+const morgan = require('morgan');
 
 const app = express();
 const server = http.createServer(app);
@@ -24,6 +26,8 @@ const API_KEY = process.env.API_KEY; // optional API key protection
 // Body parser for JSON (limit to 10MB for base64 media)
 const REMOTE_BACKUP_MS = Math.max(60000, Number(process.env.REMOTEAUTH_BACKUP_MS || 300000));
 app.use(express.json({ limit: '10mb' }));
+// HTTP request logging
+app.use(morgan(':method :url :status :res[content-length] - :response-time ms', { stream: logger.stream }));
 
 app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'index.html'));
@@ -148,12 +152,12 @@ app.get('/logout', async (req, res) => {
     try {
         const deleted = await deleteRemoteSession(clientId);
         if (deleted) {
-            console.log(`Remote session deleted for clientId=${clientId}.`);
+            logger.info('Remote session deleted', { clientId });
             return res.send(`Remote session deleted for clientId=${clientId}. Silakan restart/refresh untuk login kembali.`);
         }
         return res.send(`Tidak ada sesi yang ditemukan untuk clientId=${clientId}.`);
     } catch (err) {
-        console.error('Error deleting remote session:', err);
+        logger.error('Error deleting remote session', { clientId, error: String(err?.message || err), stack: err?.stack });
         return res.status(500).send('Gagal menghapus sesi remote. Coba lagi.');
     }
 });
@@ -180,18 +184,28 @@ if (ENABLE_LEGACY) {
 }
 
 io.on('connection', (socket) => {
-    console.log('User connected');
+    logger.info('Socket connected');
     socket.on('join', ({ clientId }) => {
         if (!clientId) return;
         socket.join(`client:${clientId}`);
+        logger.debug('Socket joined room', { room: `client:${clientId}` });
+        try {
+            const qr = manager.getLastQr(clientId);
+            if (qr) {
+                socket.emit('qr', qr);
+            }
+        } catch (e) { /* ignore */ }
+    });
+    socket.on('disconnect', (reason) => {
+        logger.info('Socket disconnected', { reason });
     });
 });
 
 // Track legacy client readiness for API usage
 let isClientReady = false;
 if (legacyClient) {
-    legacyClient.on('ready', () => { isClientReady = true; });
-    legacyClient.on('disconnected', () => { isClientReady = false; });
+    legacyClient.on('ready', () => { isClientReady = true; logger.info('[legacy] ready'); });
+    legacyClient.on('disconnected', (reason) => { isClientReady = false; logger.warn('[legacy] disconnected', { reason }); });
 }
 
 // Build middlewares
@@ -202,21 +216,28 @@ const ensureClientReady = ensureClientReadyFactory(() => isClientReady);
 app.use('/api', buildApiRouter(legacyClient, ensureClientReady, requireApiKey));
 
 // REST endpoints for client lifecycle
-app.get('/clients', (req, res) => {
-    const list = manager.listClients();
+app.get('/clients', async (req, res) => {
+    const running = manager.listClients();
     const legacyId = process.env.CLIENT_ID || 'default';
-    if (ENABLE_LEGACY && !list.includes(legacyId)) list.push(legacyId);
-    res.json({ clients: list });
+    const storeIds = await remoteStore.listClientIds().catch(() => []);
+    const set = new Set([...running, ...storeIds]);
+    if (ENABLE_LEGACY) set.add(legacyId);
+    res.json({ clients: Array.from(set) });
 });
 
-app.get('/clients/:clientId/status', (req, res) => {
+app.get('/clients/:clientId/status', async (req, res) => {
     const { clientId } = req.params;
     const legacyId = process.env.CLIENT_ID || 'default';
     if (ENABLE_LEGACY && clientId === legacyId) {
         const number = legacyClient?.info?.wid?.user;
         return res.json({ ready: !!number, exists: true, number: number || null });
     }
-    res.json(manager.getStatus(clientId));
+    const status = manager.getStatus(clientId);
+    if (!status.exists) {
+        const existsInStore = await remoteStore.sessionExists(clientId).catch(() => false);
+        if (existsInStore) return res.json({ ready: false, exists: true, number: null });
+    }
+    res.json(status);
 });
 
 app.post('/clients/:clientId/start', async (req, res) => {
@@ -229,7 +250,7 @@ app.post('/clients/:clientId/start', async (req, res) => {
         await manager.startClient(clientId);
         res.json({ ok: true });
     } catch (e) {
-        console.error('start error', e);
+        logger.error('start error', { clientId, error: String(e?.message || e), stack: e?.stack });
         res.status(500).json({ ok: false, error: String(e?.message || e) });
     }
 });
@@ -244,7 +265,7 @@ app.post('/clients/:clientId/stop', async (req, res) => {
         const ok = await manager.stopClient(clientId);
         res.json({ ok });
     } catch (e) {
-        console.error('stop error', e);
+        logger.error('stop error', { clientId, error: String(e?.message || e), stack: e?.stack });
         res.status(500).json({ ok: false, error: String(e?.message || e) });
     }
 });
@@ -254,14 +275,14 @@ app.post('/clients/:clientId/session/delete', async (req, res) => {
     const { clientId } = req.params;
     try {
         // Hentikan client manager jika berjalan (idempotent)
-        try { await manager.stopClient(clientId); } catch (_) {}
+        try { await manager.stopClient(clientId); } catch (e) { logger.warn('manager.stopClient failed during session delete', { clientId, error: String(e?.message || e) }); }
 
         // Jika legacy memakai clientId ini, hentikan juga agar file tidak terkunci
         const legacyId = process.env.CLIENT_ID || 'default';
         if (ENABLE_LEGACY && legacyClient && clientId === legacyId) {
-            try { await legacyClient.destroy(); } catch (_) {}
+            try { await legacyClient.destroy(); } catch (e) { logger.warn('legacy destroy failed during session delete', { error: String(e?.message || e) }); }
             // Tandai tidak ready
-            try { legacyClient.removeAllListeners('ready'); } catch (_) {}
+            try { legacyClient.removeAllListeners('ready'); } catch (e) { logger.warn('legacy removeAllListeners failed', { error: String(e?.message || e) }); }
         }
 
         // Hapus dari remote store (DB)
@@ -269,11 +290,11 @@ app.post('/clients/:clientId/session/delete', async (req, res) => {
 
         // Bersihkan folder sesi lokal
         const sessDir = path.join(__dirname, 'session', `RemoteAuth-${clientId}`);
-        try { await fs.promises.rm(sessDir, { recursive: true, force: true }); } catch (_) {}
+        try { await fs.promises.rm(sessDir, { recursive: true, force: true }); } catch (e) { logger.warn('remove session dir failed', { sessDir, error: String(e?.message || e) }); }
 
         return res.json({ ok: true, deleted });
     } catch (e) {
-        console.error('delete session error', e);
+        logger.error('delete session error', { clientId, error: String(e?.message || e), stack: e?.stack });
         return res.status(500).json({ ok: false, error: String(e?.message || e) });
     }
 });
@@ -303,24 +324,26 @@ async function findAvailablePort(startPort, maxTries) {
     try {
         const port = await findAvailablePort(PORT, PORT_MAX_TRIES);
         server.listen(port, () => {
-            console.log(`Server running on http://localhost:${port}`);
-            console.log(`Docs:   http://localhost:${port}/docs`);
-            console.log(`Swagger: http://localhost:${port}/docs/swagger`);
+            logger.info('Server running', { url: `http://localhost:${port}` });
+            logger.info('Docs', { url: `http://localhost:${port}/docs` });
+            logger.info('Swagger', { url: `http://localhost:${port}/docs/swagger` });
         });
     } catch (err) {
-        console.error('Failed to bind server port:', err?.message || err);
+        logger.error('Failed to bind server port', { error: String(err?.message || err), stack: err?.stack });
         process.exit(1);
     }
 })();
 
 // Graceful shutdown
 function shutdown(signal) {
-    console.log(`\nReceived ${signal}. Shutting down gracefully...`);
+    logger.warn('Shutting down gracefully', { signal });
     try {
-        legacyClient.destroy();
-    } catch (_) {}
+        legacyClient?.destroy();
+    } catch (e) {
+        logger.warn('Error during legacyClient destroy on shutdown', { error: String(e?.message || e) });
+    }
     server.close(() => {
-        console.log('HTTP server closed. Bye!');
+        logger.info('HTTP server closed. Bye!');
         process.exit(0);
     });
     // Force exit if not closed within timeout
@@ -329,3 +352,11 @@ function shutdown(signal) {
 
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
+
+// Global error logging
+process.on('unhandledRejection', (reason) => {
+    logger.error('UnhandledRejection', { reason: String(reason) });
+});
+process.on('uncaughtException', (err) => {
+    logger.error('UncaughtException', { error: String(err?.message || err), stack: err?.stack });
+});

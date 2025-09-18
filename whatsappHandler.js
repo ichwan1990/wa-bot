@@ -9,6 +9,7 @@ const { buildPoliTableHTML } = require('./service/reportService');
 const { renderHtmlToImage } = require('./service/renderService');
 const { mediaFromPngBuffer } = require('./utils/imageMedia');
 const { db } = require('./config/db_simplus');
+const logger = require('./utils/logger');
 
 // -----------------------
 // Helper & Constants
@@ -109,13 +110,13 @@ module.exports = function setupWhatsAppClient(client, io, opts = {}) {
             const emitter = room ? io.to(room) : io;
             emitter.emit('qr', qrImage);
         } catch (e) {
-            console.error('Failed generating QR:', e);
+            logger.error('Failed generating QR', { error: String(e?.message || e), stack: e?.stack });
         }
     });
 
     client.on('ready', async () => {
         if (!emitUI) return; // UI events handled elsewhere
-        console.log('✅ Client is ready!');
+    logger.info('Client is ready');
         const emitter = room ? io.to(room) : io;
         emitter.emit('ready');
         const userInfo = client.info; // client.info is a plain object
@@ -155,7 +156,7 @@ module.exports = function setupWhatsAppClient(client, io, opts = {}) {
                 const media = mediaFromPngBuffer(pngBuffer, 'kamar-report.png');
                 await message.reply(media, undefined, { caption: '🏨 Informasi Kamar' });
             } catch (err) {
-                console.error('Error fetching room info:', err);
+                logger.error('Error fetching room info', { error: String(err?.message || err), stack: err?.stack });
                 await reply(message, '❌ *Gagal mengambil data kamar. Silakan coba lagi nanti!*');
             } finally {
                 try { await chat?.clearState(); } catch (_) {}
@@ -191,7 +192,7 @@ module.exports = function setupWhatsAppClient(client, io, opts = {}) {
                 const media = mediaFromPngBuffer(pngBuffer, 'poli-report.png');
                 await message.reply(media, undefined, { caption: `🏥 Jadwal Poli untuk ${tanggal}` });
             } catch (err) {
-                console.error('Error fetching poli info:', err);
+                logger.error('Error fetching poli info', { error: String(err?.message || err), stack: err?.stack });
                 await reply(message, '❌ *Gagal mengambil informasi poli. Silakan coba lagi nanti!*');
             } finally {
                 try { await chat?.clearState(); } catch (_) {}
@@ -225,7 +226,7 @@ module.exports = function setupWhatsAppClient(client, io, opts = {}) {
 
                 await message.reply(media, undefined, { caption: '📡 Hasil Ping ke Semua Server' });
             } catch (err) {
-                console.error('Error generating ping report:', err);
+                logger.error('Error generating ping report', { error: String(err?.message || err), stack: err?.stack });
                 await reply(message, '❗ *Terjadi kesalahan saat membuat laporan ping.*');
             } finally {
                 try { await chat?.clearState(); } catch (_) {}
@@ -248,7 +249,7 @@ module.exports = function setupWhatsAppClient(client, io, opts = {}) {
                 const pingResult = await checkPing(target);
                 await reply(message, `🌍 *Hasil Ping ke ${target}:*\n${pingResult}`);
             } catch (err) {
-                console.error('Error during ping:', err);
+                logger.error('Error during ping', { error: String(err?.message || err), stack: err?.stack });
                 await reply(message, '❗ *Gagal melakukan ping ke server. Pastikan IP valid dan coba lagi!*');
             }
             return;
@@ -279,7 +280,7 @@ module.exports = function setupWhatsAppClient(client, io, opts = {}) {
                     `• Uptime: ${fmt(up)}`
                 );
             } catch (err) {
-                console.error('Error building status:', err);
+                logger.error('Error building status', { error: String(err?.message || err), stack: err?.stack });
                 await reply(message, '❗ *Gagal mengambil status.*');
             }
             return;

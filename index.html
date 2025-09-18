@@ -439,12 +439,13 @@
                         start.className = 'btn btn-sm btn-outline-success';
                         start.innerHTML = '<i class="bi bi-play"></i> Start';
                         start.onclick = async () => {
+                            // Join room & show modal BEFORE starting to avoid missing early QR
+                            selectClient(item.clientId);
                             const r = await fetch('/clients/' + encodeURIComponent(item.clientId) + '/start', { method: 'POST' });
                             const j = await r.json();
                             if (!j.ok) Swal.fire({ icon: 'error', title: 'Gagal', text: j.error||'Tidak diketahui' });
                             else {
-                                // Tampilkan modal QR tanpa reload
-                                selectClient(item.clientId);
+                                // Modal already shown
                                 Swal.fire({ icon: 'success', title: 'Berhasil', text: 'Client dimulai.' });
                             }
                             loadClients();
@@ -456,11 +457,13 @@
                         start.className = 'btn btn-sm btn-outline-success';
                         start.innerHTML = '<i class="bi bi-play"></i> Start';
                         start.onclick = async () => {
+                            // Join room & show modal BEFORE starting to avoid missing early QR
+                            selectClient(item.clientId);
                             const r = await fetch('/clients/' + encodeURIComponent(item.clientId) + '/start', { method: 'POST' });
                             const j = await r.json();
                             if (!j.ok) Swal.fire({ icon: 'error', title: 'Gagal', text: j.error||'Tidak diketahui' });
                             else {
-                                selectClient(item.clientId);
+                                // Modal already shown
                                 Swal.fire({ icon: 'success', title: 'Berhasil', text: 'Client dimulai.' });
                             }
                             loadClients();
@@ -495,38 +498,7 @@
                     if (!r.ok) throw new Error('Gagal memuat daftar clients');
                     const j = await r.json();
                     const ids = Array.isArray(j.clients) ? j.clients : [];
-                    if (!ids.length) {
-                        renderClients([]);
-                        // Auto-start default client (opsional, konfirmasi)
-                        if (!window.__askedAutoStartDefault) {
-                            window.__askedAutoStartDefault = true;
-                            const ask = await Swal.fire({
-                                icon: 'question',
-                                title: 'Mulai client default?',
-                                text: 'Daftar akun kosong. Mulai client default sekarang untuk menampilkan QR?',
-                                showCancelButton: true,
-                                confirmButtonText: 'Mulai',
-                                cancelButtonText: 'Nanti'
-                            });
-                            if (ask.isConfirmed) {
-                                try {
-                                    const defId = 'default';
-                                    const resp = await fetch('/clients/' + encodeURIComponent(defId) + '/start', { method: 'POST' });
-                                    const jr = await resp.json();
-                                    if (jr.ok) {
-                                        const params = new URLSearchParams(location.search);
-                                        params.set('client', defId);
-                                        location.search = params.toString();
-                                    } else {
-                                        Swal.fire({ icon: 'error', title: 'Gagal', text: jr.error || 'Tidak diketahui' });
-                                    }
-                                } catch (e) {
-                                    Swal.fire({ icon: 'error', title: 'Gagal', text: e.message || String(e) });
-                                }
-                            }
-                        }
-                        return;
-                    }
+                    if (!ids.length) { renderClients([]); return; }
                     const statuses = await Promise.all(ids.map(async id => {
                         try {
                             const s = await fetch('/clients/' + encodeURIComponent(id) + '/status');
@@ -552,13 +524,14 @@
                 if (!id) return Swal.fire({ icon: 'warning', title: 'Perhatian', text: 'Masukkan Client ID' });
                 if (!idRegex.test(id)) return Swal.fire({ icon: 'warning', title: 'Perhatian', text: 'Client ID hanya boleh huruf/angka, underscore, atau minus' });
                 try {
+                    // Join room & show modal BEFORE starting to avoid missing early QR
+                    selectClient(id);
                     const r = await fetch('/clients/' + encodeURIComponent(id) + '/start', { method: 'POST' });
                     const j = await r.json();
                     if (!j.ok) return Swal.fire({ icon: 'error', title: 'Gagal', text: j.error||'Tidak diketahui' });
                     addClientInput.value = '';
                     loadClients();
-                    // Langsung tampilkan modal QR tanpa reload
-                    selectClient(id);
+                    // Modal already shown, QR will arrive via socket or cached-on-join
                 } catch (e) {
                     Swal.fire({ icon: 'error', title: 'Gagal', text: e.message || String(e) });
                 }

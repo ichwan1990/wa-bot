@@ -135,6 +135,12 @@ class MySQLRemoteAuthStore {
     await fs.promises.writeFile(filePath, zipBuffer);
     return true;
   }
+
+  // List all stored client ids from the session table
+  async listClientIds() {
+    const [rows] = await this.pool.query('SELECT client_id FROM wwebjs_sessions ORDER BY updated_at DESC');
+    return rows.map(r => r.client_id);
+  }
 }
 
 async function deleteRemoteSession(clientId) {
